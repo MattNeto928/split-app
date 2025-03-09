@@ -1,4 +1,4 @@
-# CLAUDE.md - Agent Guidelines for Split-App
+# CLAUDE.md - Agent Guidelines for Split
 
 Mobile app called "Split." It is going to going to be built with React native and expo and have a very stylish, yet modern look to it. 
 

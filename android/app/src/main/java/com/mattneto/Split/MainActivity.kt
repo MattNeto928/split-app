@@ -1,4 +1,4 @@
-package com.mattneto.splitapp
+package com.mattneto.Split
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

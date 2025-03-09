@@ -1,4 +1,4 @@
-package com.mattneto.splitapp
+package com.mattneto.Split
 
 import android.app.Application
 import android.content.res.Configuration

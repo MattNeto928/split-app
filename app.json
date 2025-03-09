@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "split-app",
-    "slug": "split-app",
+    "name": "Split",
+    "slug": "Split",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.mattneto.split-app",
+      "bundleIdentifier": "com.mattneto.Split",
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
           "expo-development-client",
@@ -23,7 +23,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.mattneto.splitapp"
+      "package": "com.mattneto.Split"
     },
     "web": {
       "bundler": "metro",
