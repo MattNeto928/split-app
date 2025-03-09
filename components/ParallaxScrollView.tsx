@@ -6,6 +6,7 @@ import Animated, {
   useAnimatedStyle,
   useScrollViewOffset,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedView } from '@/components/ThemedView';
 import { useBottomTabOverflow } from '@/components/ui/TabBarBackground';
@@ -27,6 +28,7 @@ export default function ParallaxScrollView({
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
   const scrollOffset = useScrollViewOffset(scrollRef);
   const bottom = useBottomTabOverflow();
+  const insets = useSafeAreaInsets();
   const headerAnimatedStyle = useAnimatedStyle(() => {
     return {
       transform: [
@@ -45,16 +47,21 @@ export default function ParallaxScrollView({
   });
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView style={styles.container} useSafeArea edges={['top']}>
       <Animated.ScrollView
         ref={scrollRef}
         scrollEventThrottle={16}
         scrollIndicatorInsets={{ bottom }}
-        contentContainerStyle={{ paddingBottom: bottom }}>
+        contentContainerStyle={{ 
+          paddingBottom: bottom,
+        }}>
         <Animated.View
           style={[
             styles.header,
-            { backgroundColor: headerBackgroundColor[colorScheme] },
+            { 
+              backgroundColor: headerBackgroundColor[colorScheme],
+              paddingTop: Math.max(insets.top + 20, 40), // Increased padding to prevent text cutoff
+            },
             headerAnimatedStyle,
           ]}>
           {headerImage}
@@ -75,8 +82,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 32,
-    gap: 16,
+    padding: 20,
+    paddingTop: 32,
+    gap: 20,
     overflow: 'hidden',
   },
 });

@@ -1,11 +1,12 @@
 import { Text, type TextProps, StyleSheet } from 'react-native';
 
 import { useThemeColor } from '@/hooks/useThemeColor';
+import { Colors } from '@/constants/Colors';
 
 export type ThemedTextProps = TextProps & {
   lightColor?: string;
   darkColor?: string;
-  type?: 'default' | 'title' | 'defaultSemiBold' | 'subtitle' | 'link';
+  type?: 'default' | 'title' | 'defaultSemiBold' | 'subtitle' | 'link' | 'caption' | 'amount';
 };
 
 export function ThemedText({
@@ -26,6 +27,8 @@ export function ThemedText({
         type === 'defaultSemiBold' ? styles.defaultSemiBold : undefined,
         type === 'subtitle' ? styles.subtitle : undefined,
         type === 'link' ? styles.link : undefined,
+        type === 'caption' ? styles.caption : undefined,
+        type === 'amount' ? styles.amount : undefined,
         style,
       ]}
       {...rest}
@@ -35,26 +38,48 @@ export function ThemedText({
 
 const styles = StyleSheet.create({
   default: {
+    fontFamily: 'OutfitRegular',
     fontSize: 16,
     lineHeight: 24,
+    paddingVertical: 2, // Reduced padding to prevent UI issues
   },
   defaultSemiBold: {
+    fontFamily: 'OutfitSemiBold',
     fontSize: 16,
     lineHeight: 24,
-    fontWeight: '600',
+    paddingVertical: 2, // Reduced padding to prevent UI issues
   },
   title: {
+    fontFamily: 'OutfitBold',
     fontSize: 32,
-    fontWeight: 'bold',
-    lineHeight: 32,
+    letterSpacing: -0.3, // Slightly looser spacing for Outfit
+    lineHeight: 38,
+    paddingVertical: 4, // Reduced padding to prevent UI issues
   },
   subtitle: {
+    fontFamily: 'OutfitSemiBold',
     fontSize: 20,
-    fontWeight: 'bold',
+    letterSpacing: -0.2, // Slightly looser for Outfit
+    lineHeight: 28,
+    paddingVertical: 3, // Reduced padding to prevent UI issues
   },
   link: {
-    lineHeight: 30,
+    fontFamily: 'OutfitMedium',
+    lineHeight: 24,
     fontSize: 16,
-    color: '#0a7ea4',
+    paddingVertical: 2, // Reduced padding to prevent UI issues
+    color: Colors.light.tint,
+  },
+  caption: {
+    fontFamily: 'OutfitRegular',
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.light.secondaryText, // Use secondary text color
+  },
+  amount: {
+    fontFamily: 'OutfitSemiBold',
+    fontSize: 24,
+    lineHeight: 32,
+    letterSpacing: -0.2, // Adjusted for Outfit
   },
 });
