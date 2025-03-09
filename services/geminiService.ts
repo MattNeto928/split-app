@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI, Part, Content } from '@google/generative-ai';
 
-// Hard-coded API key for development 
-// In a production app, this would be fetched from environment variables
+// API key from environment variables
+// For production, replace this with process.env.GEMINI_API_KEY
 const API_KEY = 'REDACTED_GEMINI_KEY';
 
 // Cache for API client to prevent multiple instantiations
@@ -10,9 +10,11 @@ let genAI: GoogleGenerativeAI | null = null;
 // Get or create the Gemini API client
 function getGenAI() {
   if (!genAI) {
-    // Check if we have a stored key from setApiKey
+    // Check if we have a stored key from setApiKey or environment
     const storedKey = (global as any).GEMINI_API_KEY;
-    genAI = new GoogleGenerativeAI(storedKey || API_KEY);
+    // For EAS builds, try to use the EAS secret
+    const easKey = process.env?.GEMINI_API_KEY;
+    genAI = new GoogleGenerativeAI(storedKey || easKey || API_KEY);
   }
   return genAI;
 }
