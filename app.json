@@ -51,7 +51,8 @@
       },
       "eas": {
         "projectId": "f3c0ee63-9ac6-4802-8743-0771f681d68e"
-      }
+      },
+      "geminiApiKey": "placeholder"
     },
     "owner": "mattneto"
   }

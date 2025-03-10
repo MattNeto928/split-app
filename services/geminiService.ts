@@ -1,8 +1,8 @@
 import { GoogleGenerativeAI, Part, Content } from '@google/generative-ai';
+import Constants from 'expo-constants';
 
-// API key from environment variables
-// For production, replace this with process.env.GEMINI_API_KEY
-const API_KEY = 'REDACTED_GEMINI_KEY';
+// Get API key from Expo Constants
+const API_KEY = Constants.expoConfig?.extra?.geminiApiKey || '';
 
 // Cache for API client to prevent multiple instantiations
 let genAI: GoogleGenerativeAI | null = null;

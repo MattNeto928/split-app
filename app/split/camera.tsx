@@ -359,7 +359,7 @@ export default function CameraScreen() {
               end={{ x: 1, y: 0 }}
             >
               <Ionicons name="camera" size={20} color="#FFFFFF" style={styles.buttonIcon} />
-              <ThemedText style={styles.buttonText}>Grant Camera Permission</ThemedText>
+              <ThemedText style={styles.buttonText}>Continue</ThemedText>
             </LinearGradient>
           </TouchableOpacity>
           
