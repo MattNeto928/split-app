@@ -37,6 +37,7 @@ export default function CameraScreen() {
   const [loading, setLoading] = useState(false);
   const [facing, setFacing] = useState<CameraType>('back');
   const [showCamera, setShowCamera] = useState(true);
+  const [isTorchOn, setIsTorchOn] = useState(false);
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const { width, height } = Dimensions.get('window');
@@ -221,7 +222,7 @@ export default function CameraScreen() {
         quality: 0.7,
         base64: true,
         exif: false,
-        allowsEditing: true,  // Allow user to crop image to focus on receipt
+        allowsEditing: false,  // Disabled editing/cropping to use the entire screenshot
       });
       
       if (!result.canceled && result.assets && result.assets[0]) {
@@ -429,17 +430,23 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      <CameraView 
-        style={styles.camera} 
+      <CameraView
+        style={styles.camera}
         facing={facing}
         ref={cameraRef}
-      >
-        <Animated.View 
+        enableTorch={isTorchOn} // Use the enableTorch prop
+      /> {/* Close CameraView here */}
+      <Animated.View // This is the overlay content
           style={[
             styles.overlay,
             {
               opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }]
+              transform: [{ translateY: slideAnim }],
+              position: 'absolute', // Add absolute positioning
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
             }
           ]}
         >
@@ -536,7 +543,19 @@ export default function CameraScreen() {
             </View>
             
             <View style={styles.controls}>
-              <TouchableOpacity 
+              {/* Flash Toggle Button */}
+              <TouchableOpacity
+                style={styles.galleryButton} // Can reuse galleryButton style or create a new one
+                onPress={() => setIsTorchOn(current => !current)} // Toggle isTorchOn state
+              >
+                <Ionicons
+                  name={isTorchOn ? 'flashlight' : 'flashlight-outline'}
+                  size={26}
+                  color="#FFFFFF"
+                />
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={styles.galleryButton}
                 onPress={pickImage}
               >
@@ -564,7 +583,6 @@ export default function CameraScreen() {
             </View>
           </View>
         </Animated.View>
-      </CameraView>
     </View>
   );
 }

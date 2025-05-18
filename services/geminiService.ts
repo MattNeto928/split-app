@@ -27,6 +27,9 @@ let GLOBAL_API_CALL_IN_PROGRESS = false; // Separate flag to track in-progress c
 let GLOBAL_API_RESULT: any = null;
 const API_CALL_TIMEOUT = 15000; // 15 seconds
 
+// Create a GLOBAL singleton to track receipt count
+let GLOBAL_RECEIPT_COUNT = 0;
+
 // LOG STATUS - helpful for debugging
 console.log('🌎 GEMINI SERVICE LOADED - GLOBAL API CALL STATUS:', {
   GLOBAL_API_CALL_MADE,
@@ -62,11 +65,12 @@ export async function analyzeReceipt(imageBase64: string) {
     
     // Use a stable Gemini Vision model - this model has better support for vision tasks
     // Using gemini-1.5-flash, which is more reliable than 2.0 for images
-    const model = getGenAI().getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = getGenAI().getGenerativeModel({ model: 'gemini-2.5-flash-preview-04-17' });
     
     // Prepare the prompt with instructions and context
     const prompt = `Analyze this restaurant receipt image and return a JSON object with the following structure:
     {
+      "restaurantName": "name of the restaurant (if not found, return null)",
       "total": total amount as number without currency symbol,
       "tax": tax amount as number without currency symbol,
       "tip": tip amount as number without currency symbol (0 if not present),
@@ -94,9 +98,23 @@ export async function analyzeReceipt(imageBase64: string) {
     6. For unclear prices, make a reasonable estimate based on similar items
     7. If tax or tip is not visible, provide a reasonable estimate
     8. Return ONLY the JSON object with no additional text or explanations
+    9. CRITICALLY IMPORTANT: The total amount should be consistent with the sum of all item prices plus tax. 
+       If there's a discrepancy, double-check all prices and make sure they're correct.
+    10. Make sure all item prices are correctly parsed. Common receipt issues include:
+       - Mistaking item descriptions for prices
+       - Missing decimal points in prices
+       - Misreading prices from other columns (like quantity numbers)
+       - Make sure to only include the actual price in the price field
+    11. For restaurant name extraction:
+       - Look for the restaurant name at the top of the receipt
+       - Check for business names, store names, or establishment names
+       - If no clear restaurant name is found, return null for restaurantName
+       - Do not include addresses, phone numbers, or other business details in the name
+       - If the name includes "Restaurant", "Cafe", "Bar", etc., keep it as part of the name
     
     For example:
     {
+      "restaurantName": "Joe's Pizzeria",
       "total": 42.75,
       "tax": 3.50,
       "tip": 8.55,
@@ -271,6 +289,14 @@ export async function analyzeReceipt(imageBase64: string) {
       const parsedResult = JSON.parse(text);
       console.log('Parsed JSON:', parsedResult);
       
+      // Increment the global receipt count
+      GLOBAL_RECEIPT_COUNT++;
+      
+      // If no restaurant name is found, use the receipt number
+      if (!parsedResult.restaurantName) {
+        parsedResult.restaurantName = `Receipt #${GLOBAL_RECEIPT_COUNT}`;
+      }
+      
       // Add default empty assignedTo array to each menu item and handle quantities
       const menuItems = Array.isArray(parsedResult.menuItems) 
         ? parsedResult.menuItems 
@@ -317,11 +343,90 @@ export async function analyzeReceipt(imageBase64: string) {
       // Log the expanded items summary
       console.log(`Expanded ${menuItems.length} menu items into ${expandedMenuItems.length} individual items`);
       
-      // Construct the final result object with fallbacks for missing data
+      // Calculate the sum of all menu items to verify totals
+      const calculatedItemsTotal = expandedMenuItems.reduce((sum, item) => sum + (item.price || 0), 0);
+      
+      // Check for items with suspiciously high or low prices
+      const suspiciousItems = expandedMenuItems.filter(item => {
+        return item.price <= 0 || item.price > 100; // Suspicious if free or extremely expensive
+      });
+      
+      if (suspiciousItems.length > 0) {
+        console.log('⚠️ Found suspicious item prices:');
+        suspiciousItems.forEach(item => {
+          console.log(`  - ${item.name}: $${item.price.toFixed(2)}`);
+        });
+      }
+      
+      // Get the parsed values
+      const parsedTotal = parsedResult.total || 0;
+      const parsedTax = parsedResult.tax || 0;
+      const parsedTip = parsedResult.tip || 0;
+      
+      console.log('Verification check:');
+      console.log(`Parsed total: ${parsedTotal}`);
+      console.log(`Calculated sum of all items: ${calculatedItemsTotal.toFixed(2)}`);
+      console.log(`Parsed tax: ${parsedTax}`);
+      console.log(`Parsed tip: ${parsedTip}`);
+      
+      // Verify if the total is consistent with the sum of items + tax
+      // If there's a significant discrepancy, use the calculated value
+      const expectedTotal = calculatedItemsTotal + parsedTax;
+      const totalDiscrepancy = Math.abs(parsedTotal - expectedTotal);
+      const discrepancyPercent = (totalDiscrepancy / expectedTotal) * 100;
+      
+      console.log(`Expected total (items + tax): ${expectedTotal.toFixed(2)}`);
+      console.log(`Discrepancy: ${totalDiscrepancy.toFixed(2)} (${discrepancyPercent.toFixed(2)}%)`);
+      
+      // If there's a large discrepancy (more than 10%), use the calculated values
+      let finalTotal = parsedTotal;
+      let finalTax = parsedTax;
+      
+      // Calculate the apparent tax rate
+      const apparentTaxRate = parsedTax / calculatedItemsTotal;
+      console.log(`Apparent tax rate: ${(apparentTaxRate * 100).toFixed(2)}%`);
+      
+      // Check if the tax rate seems reasonable (usually between 5-15%)
+      const isReasonableTaxRate = apparentTaxRate >= 0.05 && apparentTaxRate <= 0.15;
+      console.log(`Tax rate seems reasonable: ${isReasonableTaxRate}`);
+      
+      // Check for discrepancies and fix if needed
+      if (discrepancyPercent > 10) {
+        console.log('⚠️ Large discrepancy detected! Using calculated values instead of parsed values');
+        
+        // Tax rate check - if it doesn't seem reasonable, estimate it
+        if (!isReasonableTaxRate) {
+          // Use 8% as a reasonable tax rate estimate
+          finalTax = Math.round(calculatedItemsTotal * 0.08 * 100) / 100; // ~8% tax rate, rounded to 2 decimals
+          console.log(`Tax rate of ${(apparentTaxRate * 100).toFixed(2)}% seems incorrect. Estimated new tax: ${finalTax.toFixed(2)}`);
+        }
+        
+        // Recalculate total based on items plus calculated tax
+        finalTotal = calculatedItemsTotal + finalTax;
+        console.log(`Recalculated total: ${finalTotal.toFixed(2)}`);
+      } else {
+        // Even if the discrepancy is small, check if tax rate is unreasonable
+        if (!isReasonableTaxRate && calculatedItemsTotal > 0) {
+          console.log(`⚠️ Tax rate of ${(apparentTaxRate * 100).toFixed(2)}% seems unusual`);
+          
+          // Only override if it's really off
+          if (apparentTaxRate < 0.01 || apparentTaxRate > 0.20) {
+            finalTax = Math.round(calculatedItemsTotal * 0.08 * 100) / 100;
+            console.log(`Using estimated tax: ${finalTax.toFixed(2)}`);
+            
+            // Update total to match
+            finalTotal = calculatedItemsTotal + finalTax;
+            console.log(`Updated total to match: ${finalTotal.toFixed(2)}`);
+          }
+        }
+      }
+      
+      // Construct the final result object with verified values
       const processedResult = {
-        total: (parsedResult.total || 0).toString(),
-        tax: (parsedResult.tax || 0).toString(),
-        tip: (parsedResult.tip || 0).toString(),
+        restaurantName: parsedResult.restaurantName,
+        total: finalTotal.toString(),
+        tax: finalTax.toString(),
+        tip: (parsedTip || 0).toString(),
         menuItems: expandedMenuItems,
         splitAmounts: [] // This will be calculated by the app based on assignments
       };

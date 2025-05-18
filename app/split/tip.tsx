@@ -1,32 +1,22 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  StyleSheet,
-  TouchableOpacity,
-  View,
-  Text,
-  TextInput,
-  Animated,
-  Keyboard,
-  ScrollView,
-  Platform,
-  Alert,
-  TouchableWithoutFeedback,
-  BackHandler
-} from 'react-native';
-import { useRouter } from 'expo-router';
+import { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Keyboard, Platform, Alert, BackHandler, TouchableWithoutFeedback, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-import { ThemedText } from '@/components/ThemedText';
-import { SafeAreaHeader } from '@/components/SafeAreaHeader';
-import { useSplitContext } from '@/contexts/SplitContext';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { useThemeColor } from '@/hooks/useThemeColor';
+import { Ionicons } from '@expo/vector-icons';
+import { useSplitContext } from '../../contexts/SplitContext';
+import { SafeAreaHeader } from '../../components/SafeAreaHeader';
+import { ThemedText } from '../../components/ThemedText';
+import { useColorScheme } from '../../hooks/useColorScheme';
+import { useThemeColor } from '../../hooks/useThemeColor';
 
 export default function TipScreen() {
   const router = useRouter();
-  const { result, setSplitResult } = useSplitContext();
+  const { 
+    result, 
+    setSplitResult, 
+    updateTipAndRecalculate
+  } = useSplitContext();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const textColor = useThemeColor({}, 'text');
@@ -35,15 +25,31 @@ export default function TipScreen() {
   // Track component mounting
   const isMounted = useRef(false);
   
-  // If the result already has a tip value, skip to results screen
+  // Track if we came from the results page to edit the tip
+  const [isEditingTip, setIsEditingTip] = useState(false);
+  
+  // If the result already has a tip value, skip to results screen unless we are editing
   useEffect(() => {
     // Set mounted flag
     isMounted.current = true;
     
-    // Use a timeout to ensure the component is fully mounted
+    // Check if we came from results page by looking at navigation state
+    const checkIfEditingTip = () => {
+      try {
+        // Use a more reliable way to check if we're editing
+        return result?.tip !== undefined && result?.tip !== '';
+      } catch (e) {
+        return false;
+      }
+    };
+    
+    // Set editing state
+    setIsEditingTip(checkIfEditingTip());
+    
+    // Only auto-navigate if we have a tip AND we are not editing
     const timer = setTimeout(() => {
-      if (isMounted.current && result?.tip && parseFloat(result.tip) > 0) {
-        router.replace('/split/results');
+      if (isMounted.current && result?.tip && parseFloat(result.tip) > 0 && !checkIfEditingTip()) {
+        router.replace("/split/results");
       }
     }, 100);
     
@@ -55,13 +61,13 @@ export default function TipScreen() {
 
   // Background gradient colors
   const backgroundGradient = isDark
-    ? ['#121212', '#1a1a1a']
-    : ['#ffffff', '#f8f9fa'];
+    ? ['#121212', '#1a1a1a'] as const
+    : ['#ffffff', '#f8f9fa'] as const;
     
   // Button gradient
   const buttonGradient = isDark 
-    ? ['#3498db', '#2c7db1'] 
-    : ['#3498db', '#2980b9'];
+    ? ['#3498db', '#2c7db1'] as const
+    : ['#3498db', '#2980b9'] as const;
   
   // Calculate subtotal (total - tax)
   const total = result ? parseFloat(result.total.replace(/[^0-9.]/g, '')) : 0;
@@ -127,14 +133,49 @@ export default function TipScreen() {
     }
   };
   
-  const handleSelectTip = (percent) => {
+  const handleSelectTip = (percent: number) => {
     setTipPercent(percent);
     setIsCustom(false);
     Keyboard.dismiss();
+
+    // --- Trigger immediate update and recalculation --- 
+    if (result) {
+      const newTipAmount = (subtotal * percent / 100);
+      console.log(`Tip Screen: Selected ${percent}%, calling updateTipAndRecalculate with amount: ${newTipAmount}`);
+      updateTipAndRecalculate(newTipAmount);
+    }
+    // --- End immediate update ---
   };
   
   const handleCustomTip = () => {
     setIsCustom(true);
+    // Update context immediately when switching to custom
+    if (result) {
+      const currentCustomAmount = parseFloat(customTip) || 0;
+      console.log(`Tip Screen: Switched to custom, calling updateTipAndRecalculate with amount: ${currentCustomAmount}`);
+      updateTipAndRecalculate(currentCustomAmount);
+    }
+  };
+
+  const handleCustomTipChange = (value: string) => {
+    // Only allow numbers and one decimal point
+    const numericValue = value.replace(/[^0-9.]/g, '');
+    // Prevent multiple decimal points
+    const parts = numericValue.split('.');
+    let validatedValue = numericValue;
+    if (parts.length > 2) {
+      validatedValue = `${parts[0]}.${parts.slice(1).join('')}`;
+    }
+    
+    setCustomTip(validatedValue);
+
+    // --- Trigger immediate update and recalculation --- 
+    if (result) {
+      const newTipAmount = parseFloat(validatedValue) || 0;
+      console.log(`Tip Screen: Custom tip changed to ${validatedValue}, calling updateTipAndRecalculate with amount: ${newTipAmount}`);
+      updateTipAndRecalculate(newTipAmount);
+    }
+    // --- End immediate update ---
   };
   
   const handleContinue = () => {
@@ -162,6 +203,10 @@ export default function TipScreen() {
       tip: formattedTip
     });
     
+    // Call recalculateSplitAmounts explicitly before navigation
+    // This ensures the split amounts are updated before going to results
+    updateTipAndRecalculate(tipAmount);
+    
     // Navigate with a delay to ensure state updates and recalculation complete
     setTimeout(() => {
       console.log('Navigating to results after tip processing');
@@ -170,7 +215,7 @@ export default function TipScreen() {
         // Use replace instead of push to prevent going back to tip screen
         router.replace('/split/results');
       }
-    }, 400);
+    }, 600); // Increased timeout to ensure calculations complete
   };
   
   const handleBack = () => {
@@ -200,10 +245,10 @@ export default function TipScreen() {
               colors={buttonGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
-              style={styles.buttonGradient}
+              style={styles.continueButtonGradient}
             >
-              <Text style={styles.buttonText}>Continue to Results</Text>
-              <Ionicons name="arrow-forward" size={20} color="#FFFFFF" style={styles.buttonIcon} />
+              <Text style={styles.continueButtonText}>Continue to Results</Text>
+              <Ionicons name="arrow-forward" size={20} color="#FFFFFF" style={{ marginLeft: 8 }} />
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -236,8 +281,8 @@ export default function TipScreen() {
                 <View style={styles.cardContainer}>
                   <LinearGradient
                     colors={isDark ? 
-                      ['rgba(40, 40, 40, 0.8)', 'rgba(25, 25, 25, 0.8)'] : 
-                      ['rgba(255, 255, 255, 0.9)', 'rgba(245, 245, 245, 0.9)']}
+                      ['rgba(40, 40, 40, 0.8)', 'rgba(25, 25, 25, 0.8)'] as const : 
+                      ['rgba(255, 255, 255, 0.9)', 'rgba(245, 245, 245, 0.9)'] as const}
                     style={styles.cardGradient}
                   >
                     <View style={styles.billCard}>
@@ -277,11 +322,15 @@ export default function TipScreen() {
                   >
                     <ThemedText style={[
                       styles.tipText,
-                      !isCustom && tipPercent === 18 && styles.selectedTipText
+                      { color: (!isCustom && tipPercent === 18) ? '#3498db' : textColor },
+                      // Apply selectedTipText for other properties if needed, but color is handled above
+                      // !isCustom && tipPercent === 18 && styles.selectedTipText
                     ]}>18%</ThemedText>
                     <ThemedText style={[
                       styles.tipAmount,
-                      !isCustom && tipPercent === 18 && styles.selectedTipText
+                      { color: (!isCustom && tipPercent === 18) ? '#3498db' : textColor },
+                       // Apply selectedTipText for other properties if needed, but color is handled above
+                      // !isCustom && tipPercent === 18 && styles.selectedTipText
                     ]}>${(subtotal * 0.18).toFixed(2)}</ThemedText>
                   </TouchableOpacity>
                   
@@ -294,11 +343,11 @@ export default function TipScreen() {
                   >
                     <ThemedText style={[
                       styles.tipText,
-                      !isCustom && tipPercent === 20 && styles.selectedTipText
+                      { color: (!isCustom && tipPercent === 20) ? '#3498db' : textColor },
                     ]}>20%</ThemedText>
                     <ThemedText style={[
                       styles.tipAmount,
-                      !isCustom && tipPercent === 20 && styles.selectedTipText
+                      { color: (!isCustom && tipPercent === 20) ? '#3498db' : textColor },
                     ]}>${(subtotal * 0.20).toFixed(2)}</ThemedText>
                   </TouchableOpacity>
                   
@@ -311,11 +360,11 @@ export default function TipScreen() {
                   >
                     <ThemedText style={[
                       styles.tipText,
-                      !isCustom && tipPercent === 22 && styles.selectedTipText
+                      { color: (!isCustom && tipPercent === 22) ? '#3498db' : textColor },
                     ]}>22%</ThemedText>
                     <ThemedText style={[
                       styles.tipAmount,
-                      !isCustom && tipPercent === 22 && styles.selectedTipText
+                      { color: (!isCustom && tipPercent === 22) ? '#3498db' : textColor },
                     ]}>${(subtotal * 0.22).toFixed(2)}</ThemedText>
                   </TouchableOpacity>
                 </View>
@@ -334,13 +383,7 @@ export default function TipScreen() {
                         placeholderTextColor={isDark ? "#777" : "#999"}
                         keyboardType="decimal-pad"
                         value={customTip}
-                        onChangeText={(text) => {
-                          // Only allow numbers and a single decimal point
-                          if (text === '' || /^\d*\.?\d*$/.test(text)) {
-                            setCustomTip(text);
-                            setIsCustom(true);
-                          }
-                        }}
+                        onChangeText={handleCustomTipChange}
                         onFocus={handleCustomTip}
                         returnKeyType="done"
                         onSubmitEditing={Keyboard.dismiss}
@@ -477,6 +520,20 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 6,
+    // Explicitly set color using the theme's text color
+    // Note: 'textColor' must be in scope here.
+    // This change assumes 'textColor' is available in the StyleSheet.create scope.
+    // If not, this needs to be handled differently, e.g., by passing color as a prop
+    // or by dynamically creating the style in the component.
+    // For now, I'll assume it can be accessed or this will be adjusted.
+    // A better approach would be to ensure ThemedText handles this by default
+    // or to adjust ThemedText itself.
+    // However, to directly address the style:
+    // This will cause an error if textColor is not defined in this scope.
+    // A more robust solution is needed if textColor is not accessible here.
+    // Let's assume for now we will make textColor available or adjust.
+    // For the purpose of this diff, I will add a placeholder and then refine.
+    // color: textColor, // This line will be problematic if textColor is not in scope
   },
   tipAmount: {
     opacity: 0.7,
@@ -538,26 +595,26 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   continueButton: {
+    width: '100%',
     borderRadius: 16,
     overflow: 'hidden',
-    elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.14,
     shadowRadius: 8,
+    elevation: 4,
   },
-  buttonGradient: {
+  continueButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
-    paddingHorizontal: 32,
-    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
   },
-  buttonText: {
-    color: '#fff',
-    fontFamily: 'InterSemiBold',
+  continueButtonText: {
+    color: '#ffffff',
     fontSize: 16,
+    fontWeight: 'bold',
   },
   buttonIcon: {
     marginLeft: 8,

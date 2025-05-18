@@ -9,6 +9,10 @@ export default ({config}) => {
     extra: {
       ...config.extra,
       geminiApiKey
-    }
+    },
+    "plugins": [
+    "expo-font",
+    "expo-web-browser"
+  ]
   };
 };

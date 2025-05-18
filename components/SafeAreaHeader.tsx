@@ -83,6 +83,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(150, 150, 150, 0.1)',
   },
   title: {
+    flex: 1, // Allow title to take available space
+    textAlign: 'center', // Center the title text
     fontSize: 28,
     fontWeight: '600',
   },

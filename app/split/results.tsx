@@ -1,23 +1,29 @@
-import { useEffect, useState, useRef } from 'react';
-import { 
-  StyleSheet, 
-  TouchableOpacity, 
-  ScrollView, 
-  Alert, 
-  ActivityIndicator, 
-  Image, 
-  Share, 
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import {
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  Image,
+  Share,
   View,
   Animated,
   Easing,
   Text,
   Modal,
-  Dimensions
+  Dimensions,
+  Platform,
+  TextInput,
+  KeyboardAvoidingView,
+  TouchableWithoutFeedback,
+  Keyboard
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BlurView } from 'expo-blur';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -25,6 +31,7 @@ import { SafeAreaHeader } from '@/components/SafeAreaHeader';
 import { useSplitContext } from '@/contexts/SplitContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useThemeColor } from '@/hooks/useThemeColor';
+import { saveReceiptToHistory } from '@/services/storageService';
 
 // Function to generate consistent colors based on index
 const getPersonColor = (index: number) => {
@@ -43,55 +50,73 @@ const getPersonColor = (index: number) => {
 
 export default function ResultsScreen() {
   const router = useRouter();
-  const { people, receiptImage, result, reset, recalculateSplitAmounts } = useSplitContext();
-  const [error, setError] = useState<string | null>(null);
-  const [receiptModalVisible, setReceiptModalVisible] = useState(false);
+  const params = useLocalSearchParams();
+  const fromHistory = params.from === 'history'; // Check if we came from history
+  const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const textColor = useThemeColor({}, 'text');
   const backgroundColor = useThemeColor({}, 'background');
-  const insets = useSafeAreaInsets();
+  const cardBackground = useThemeColor({}, 'cardBackground');
+  const textColor = useThemeColor({}, 'text');
   
+  const { 
+    people, 
+    receiptImage, 
+    result, 
+    reset, 
+    recalculateSplitAmounts,
+    setSplitResult,
+    setReceiptImage,
+    assignItemToPerson,
+    currentHistoryId,
+    setCurrentHistoryId
+  } = useSplitContext();
+  
+  const [error, setError] = useState<string | null>(null);
+  const [receiptModalVisible, setReceiptModalVisible] = useState(false);
+  const [tipModalVisible, setTipModalVisible] = useState(false);
+  const [tipAmount, setTipAmount] = useState('');
+  const [tipPercent, setTipPercent] = useState('');
+  const [activeTipOption, setActiveTipOption] = useState<'amount' | 'percent'>('percent');
+  const [tipModalAnimation] = useState(new Animated.Value(0));
+
   // Background gradient colors
   const backgroundGradient = isDark
-    ? ['#121212', '#1a1a1a']
-    : ['#ffffff', '#f8f9fa'];
-    
-  // Button gradient
-  const buttonGradient = isDark 
-    ? ['#3498db', '#2c7db1'] 
-    : ['#3498db', '#2980b9'];
-    
-  // Card gradients
+    ? ['#121212', '#1a1a1a'] as const
+    : ['#ffffff', '#f8f9fa'] as const;
+
+  // Card gradient
   const cardGradient = isDark
-    ? ['rgba(40, 40, 40, 0.7)', 'rgba(30, 30, 30, 0.7)']
-    : ['rgba(255, 255, 255, 0.9)', 'rgba(248, 250, 252, 0.9)'];
-    
-  // You pay card gradient
-  const youPayGradient = ['#3498db', '#2980b9'];
-  
+    ? ['rgba(40, 40, 40, 0.8)', 'rgba(30, 30, 30, 0.8)'] as const
+    : ['rgba(255, 255, 255, 0.9)', 'rgba(248, 250, 252, 0.9)'] as const;
+
+  // Button gradient
+  const buttonGradient = isDark
+    ? ['#3498db', '#2c7db1'] as const
+    : ['#3498db', '#2980b9'] as const;
+
   // Animation values
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(50)).current;
   const staggeredItems = useRef(people.map(() => new Animated.Value(0))).current;
   const scaleYouPay = useRef(new Animated.Value(0.9)).current;
-  
+
   // Track component mounting
   const isMounted = useRef(false);
-  
+
   useEffect(() => {
     // Set mounted flag
     isMounted.current = true;
-    console.log('Results screen mounted, checking data:', { 
-      hasReceiptImage: !!receiptImage, 
-      hasResult: !!result, 
+    console.log('Results screen mounted, checking data:', {
+      hasReceiptImage: !!receiptImage,
+      hasResult: !!result,
       splitAmounts: result?.splitAmounts?.length
     });
-    
+
     // Function to check if we need to navigate away
     const handleNavigation = () => {
       if (!isMounted.current) return false;
-      
+
       if (!receiptImage) {
         // No image to analyze, go back to camera
         console.log('No receipt image, going back to camera screen');
@@ -102,7 +127,7 @@ export default function ResultsScreen() {
         }, 300);
         return true;
       }
-  
+
       if (!result) {
         // No result available, go back to items screen to retry
         console.log('No result data, going back to items screen');
@@ -113,7 +138,7 @@ export default function ResultsScreen() {
         }, 300);
         return true;
       }
-      
+
       if (!result.splitAmounts || result.splitAmounts.length === 0) {
         console.log('No split amounts calculated, going back to tip screen');
         setTimeout(() => {
@@ -123,10 +148,10 @@ export default function ResultsScreen() {
         }, 300);
         return true;
       }
-      
+
       return false;
     };
-    
+
     // Function to start animations
     const startAnimations = () => {
       console.log('Starting results screen animations');
@@ -149,8 +174,8 @@ export default function ResultsScreen() {
           useNativeDriver: true,
           easing: Easing.elastic(1.3),
         }),
-        Animated.stagger(150, 
-          staggeredItems.map(anim => 
+        Animated.stagger(150,
+          staggeredItems.map(anim =>
             Animated.timing(anim, {
               toValue: 1,
               duration: 500,
@@ -161,143 +186,293 @@ export default function ResultsScreen() {
         )
       ]).start();
     };
-    
+
     // Use a timer for navigation validation and checking unassigned items
     const timer = setTimeout(() => {
       if (!isMounted.current) return;
-      
-      // First check navigation requirements
+
+      // First check navigation requirements (image, result)
+      if (!receiptImage || !result) {
+        console.log('Missing receipt image or result on mount, handling navigation...');
+        handleNavigation(); // handleNavigation already checks and navigates
+        return;
+      }
       const shouldNavigateAway = handleNavigation();
       if (shouldNavigateAway) return;
-      
-      // Then check if all items are assigned
-      if (result?.menuItems && result.menuItems.length > 0) {
-        const unassignedItems = result.menuItems.filter(item => 
+
+      // Then check if all items are assigned - skip this check if coming from history
+      if (!fromHistory && result?.menuItems && result.menuItems.length > 0) {
+        const unassignedItems = result.menuItems.filter(item =>
           item.price > 0 && item.assignedTo.length === 0
         );
-        
+
         if (unassignedItems.length > 0 && isMounted.current) {
-          // Some items are not assigned, go back to items screen
           console.log('Found unassigned items, going back to items screen');
           Alert.alert(
-            "Unassigned Items", 
-            "Some items haven't been assigned to anyone. Please assign all items before continuing.",
+            "Unassigned Items",
+            "Some items haven\'t been assigned. Please assign all items.",
             [{ text: "OK", style: "default" }]
           );
           setTimeout(() => {
             if (isMounted.current) {
-              router.replace('/split/items');
+              // Simplify navigation - always go back to items screen if unassigned
+              router.replace('/split/items'); 
             }
           }, 300);
           return;
         }
       }
-      
-      // Check if there are split amounts
+
+      // Check if split amounts exist. 
+      // If missing AND NOT from history, navigate back to tip screen.
+      // If missing AND from history, log error and navigate back to history.
+      // NEVER recalculate automatically here.
       if (!result.splitAmounts || result.splitAmounts.length === 0) {
-        console.error('Split amounts not calculated, recalculating');
-        recalculateSplitAmounts();
-        
-        // Wait a bit and try again
-        setTimeout(() => {
-          if (!isMounted.current) return;
-          if (!result.splitAmounts || result.splitAmounts.length === 0) {
-            // Still no split amounts, go back to items
-            console.error('Failed to calculate split amounts, going back to tip screen');
-            router.replace('/split/tip');
-            return;
-          }
-          // Split amounts recalculated successfully, start animations
-          startAnimations();
-        }, 300);
-        return;
+        if (fromHistory) {
+          console.error('ERROR: Navigated from history but splitAmounts are missing in context!');
+          Alert.alert('Error', 'Could not load split details from history.');
+          setTimeout(() => {
+            if (isMounted.current) router.replace('/(tabs)/history');
+          }, 300);
+        } else {
+          console.warn('Split amounts missing (not from history), navigating back to tip screen.');
+          setTimeout(() => {
+            if (isMounted.current) router.replace('/split/tip');
+          }, 300);
+        }
+        return; // Stop execution, don't start animations or save
       }
-      
-      // Start animations only if all checks pass
-      startAnimations();
-    }, 300);
-    
+
+      // --- Save/Update History Item --- 
+      console.log('All checks passed. Saving/Updating history item...');
+      saveReceiptToHistory(receiptImage, result, people, currentHistoryId || undefined)
+        .then((savedId) => {
+          if (savedId && !currentHistoryId) {
+            // If it was a new save, store the ID in context
+            console.log('New history item saved with ID:', savedId);
+            setCurrentHistoryId(savedId);
+          } else if (savedId && currentHistoryId) {
+            console.log('Existing history item updated:', savedId);
+          } else if (!savedId && currentHistoryId) {
+             console.warn('Update history attempted, but save function returned no ID. History ID was:', currentHistoryId);
+          } else if (!savedId && !currentHistoryId) {
+             console.log('Save history skipped (likely duplicate or other issue).');
+          }
+          // Start animations only AFTER save attempt is complete
+          startAnimations(); 
+        })
+        .catch(error => {
+          console.error('Error saving/updating receipt to history:', error);
+          Alert.alert('Error', 'Could not save receipt details.');
+          // Still start animations even if save fails
+          startAnimations(); 
+        });
+      // --- End Save/Update --- 
+
+    }, 150); // Slightly longer timeout again
+
     return () => {
       clearTimeout(timer);
       isMounted.current = false;
     };
-  }, [receiptImage, result, recalculateSplitAmounts, router, fadeIn, slideUp, staggeredItems, scaleYouPay]);
+  // Corrected dependencies: include history ID state and setter
+  }, [receiptImage, result, fromHistory, router, recalculateSplitAmounts, people, currentHistoryId, setCurrentHistoryId]); 
 
-  const handleShareResults = async () => {
-    try {
-      if (!result) return;
-      
-      // Format the message with total including tip 
-      const total = parseFloat(result.total.replace(/[^0-9.]/g, '')) || 0;
-      const tax = parseFloat(result.tax.replace(/[^0-9.]/g, '')) || 0;
-      const tip = parseFloat(result.tip.replace(/[^0-9.]/g, '')) || 0;
-      const subtotal = total - tax;
-      const grandTotal = subtotal + tax + tip;
-      
-      // Log the values for debugging
-      console.log('Sharing results:');
-      console.log(`Subtotal: $${subtotal.toFixed(2)}`);
-      console.log(`Tax: $${tax.toFixed(2)}`);
-      console.log(`Tip: $${tip.toFixed(2)}`);
-      console.log(`Total with tip: $${grandTotal.toFixed(2)}`);
-      
-      const totalMessage = `Total bill: $${grandTotal.toFixed(2)}\nSubtotal: $${subtotal.toFixed(2)}\nTax: $${tax.toFixed(2)}\nTip: $${tip.toFixed(2)}`;
-      
-      // The split amounts from the context already include tip and tax
-      // We don't need to modify them further
-      const individualAmounts = result.splitAmounts
-        .map(split => {
-          const person = people.find(p => p.id === split.personId);
-          return person ? `${person.name}: $${split.amount}` : '';
-        })
-        .filter(Boolean)
-        .join('\n');
-      
-      // Calculate sum of all shares to verify
-      let sumOfAllShares = 0;
-      result.splitAmounts.forEach(split => {
-        sumOfAllShares += parseFloat(split.amount);
-      });
-      
-      console.log(`Sum of all shares: $${sumOfAllShares.toFixed(2)}`);
-      console.log(`Match expected total? ${Math.abs(grandTotal - sumOfAllShares) < 0.02 ? 'Yes' : 'No'}`);
-      
-      const message = `Split Results\n\n${totalMessage}\n\n${individualAmounts}\n\nPowered by Split App`;
-      
-      await Share.share({
-        message,
-        title: 'Split',
-      });
-    } catch (error) {
-      console.error('Error sharing results:', error);
-      Alert.alert('Error', 'Failed to share results');
-    }
-  };
+  const handleShareResults = useCallback(() => {
+    if (!result || !people) return;
+    
+    // Calculate values ensuring tip is included
+    const total = parseFloat(result.total.replace(/[^0-9.]/g, '')) || 0;
+    const tax = parseFloat(result.tax.replace(/[^0-9.]/g, '')) || 0;
+    const tip = parseFloat(result.tip.replace(/[^0-9.]/g, '')) || 0;
+    const subtotal = total - tax;
+    const grandTotal = subtotal + tax + tip;
+
+    // Log the values for debugging
+    console.log('Sharing results:');
+    console.log(`Subtotal: $${subtotal.toFixed(2)}`);
+    console.log(`Tax: $${tax.toFixed(2)}`);
+    console.log(`Tip: $${tip.toFixed(2)}`);
+    console.log(`Total with tip: $${grandTotal.toFixed(2)}`);
+
+    const totalMessage = `Total bill: $${grandTotal.toFixed(2)}\nSubtotal: $${subtotal.toFixed(2)}\nTax: $${tax.toFixed(2)}\nTip: $${tip.toFixed(2)}`;
+
+    // The split amounts from the context already include tip and tax
+    // We don't need to modify them further
+    const individualAmounts = result.splitAmounts
+      .map(split => {
+        const person = people.find(p => p.id === split.personId);
+        return person ? `${person.name}: $${split.amount}` : '';
+      })
+      .filter(Boolean)
+      .join('\n');
+
+    // Calculate sum of all shares to verify
+    let sumOfAllShares = 0;
+    result.splitAmounts.forEach(split => {
+      sumOfAllShares += parseFloat(split.amount);
+    });
+
+    console.log(`Sum of all shares: $${sumOfAllShares.toFixed(2)}`);
+    console.log(`Match expected total? ${Math.abs(grandTotal - sumOfAllShares) < 0.02 ? 'Yes' : 'No'}`);
+
+    const message = `Split Results\n\n${totalMessage}\n\n${individualAmounts}\n\nPowered by Split App`;
+
+    Share.share({
+      message,
+      title: 'Split',
+    });
+  }, [result, people]);
 
   const handleEditItems = () => {
     router.replace('/split/items');
   };
 
-  const handleNewSplit = () => {
-    // Prompt the user before resetting
-    Alert.alert(
-      "Start New Split?",
-      "This will delete your current split data. Are you sure you want to continue?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel"
-        },
-        {
-          text: "Yes, Start New", 
-          onPress: () => {
-            // Reset and go to people selection page
-            reset();
-            router.replace('/split/people');
-          }
-        }
-      ]
-    );
+  const handleNewSplit = useCallback(() => {
+    // ONLY call reset now. Navigation will be handled within the context's reset function.
+    console.log('Completing split, calling context reset...');
+    reset();
+  }, [reset]); // Only depends on reset now
+
+  const handleOpenTipModal = () => {
+    if (!result) return;
+    
+    // Parse current tip value
+    const currentTip = parseFloat(result.tip.replace(/[^0-9.]/g, '')) || 0;
+    
+    // Calculate subtotal and tip percentage
+    const total = parseFloat(result.total.replace(/[^0-9.]/g, '')) || 0;
+    const tax = parseFloat(result.tax.replace(/[^0-9.]/g, '')) || 0;
+    const subtotal = total - tax;
+    
+    // Calculate current tip percentage
+    const currentTipPercent = subtotal > 0 ? ((currentTip / subtotal) * 100).toFixed(2) : '0';
+    
+    // Set initial values
+    setTipAmount(currentTip.toFixed(2));
+    setTipPercent(currentTipPercent);
+    setActiveTipOption(currentTip > 0 ? 'percent' : 'amount');
+    
+    // Open modal with animation
+    setTipModalVisible(true);
+    Animated.spring(tipModalAnimation, {
+      toValue: 1,
+      useNativeDriver: true,
+      friction: 8,
+      tension: 50
+    }).start();
+  };
+
+  const handleCloseTipModal = () => {
+    Animated.timing(tipModalAnimation, {
+      toValue: 0,
+      duration: 250,
+      useNativeDriver: true,
+      easing: Easing.inOut(Easing.cubic)
+    }).start(() => {
+      setTipModalVisible(false);
+    });
+  };
+
+  const handleUpdateTip = () => {
+    if (!result) return;
+    
+    try {
+      // Parse values
+      const total = parseFloat(result.total.replace(/[^0-9.]/g, '')) || 0;
+      const tax = parseFloat(result.tax.replace(/[^0-9.]/g, '')) || 0;
+      const subtotal = total - tax;
+      
+      // Determine which tip value to use
+      let newTipValue: number;
+      
+      if (activeTipOption === 'amount') {
+        newTipValue = parseFloat(tipAmount) || 0;
+      } else {
+        // Calculate tip from percentage
+        const percentage = parseFloat(tipPercent) || 0;
+        newTipValue = (percentage / 100) * subtotal;
+      }
+      
+      // Update result with new tip value
+      const updatedResult = {
+        ...result,
+        tip: newTipValue.toString()
+      };
+      
+      // Recalculate split amounts with new tip
+      setSplitResult(updatedResult);
+      
+      // Use requestAnimationFrame to ensure state update has a chance to propagate
+      requestAnimationFrame(() => {
+        recalculateSplitAmounts(newTipValue.toString()); // Pass the new tip value directly
+      });
+      
+      // Close modal
+      handleCloseTipModal();
+    } catch (error) {
+      console.error('Error updating tip:', error);
+      Alert.alert('Error', 'Could not update tip. Please try again.');
+    }
+  };
+
+  const handleTipAmountChange = (value: string) => {
+    let sanitizedValue = value.replace(/[^0-9.]/g, ''); // Allow only numbers and one dot
+    const parts = sanitizedValue.split('.');
+    if (parts.length > 1) {
+      // If there's a decimal part, ensure it's max 2 digits
+      parts[1] = parts[1].substring(0, 2);
+      sanitizedValue = parts.join('.');
+    }
+    // Prevent multiple leading zeros unless it's "0."
+    if (sanitizedValue.length > 1 && sanitizedValue.startsWith('0') && !sanitizedValue.startsWith('0.')) {
+        sanitizedValue = sanitizedValue.substring(1);
+    }
+
+
+    setTipAmount(sanitizedValue);
+    
+    // Update percentage if subtotal > 0
+    if (result) {
+      const total = parseFloat(result.total.replace(/[^0-9.]/g, '')) || 0;
+      const tax = parseFloat(result.tax.replace(/[^0-9.]/g, '')) || 0;
+      const subtotal = total - tax;
+      
+      if (subtotal > 0) {
+        const amount = parseFloat(value) || 0;
+        const newPercentage = (amount / subtotal) * 100;
+        setTipPercent(newPercentage.toFixed(2));
+      }
+    }
+  };
+
+  const handleTipPercentChange = (value: string) => {
+    let sanitizedValue = value.replace(/[^0-9.]/g, ''); // Allow only numbers and one dot
+    const parts = sanitizedValue.split('.');
+    if (parts.length > 1) {
+      // If there's a decimal part, ensure it's max 2 digits
+      parts[1] = parts[1].substring(0, 2);
+      sanitizedValue = parts.join('.');
+    }
+    // Prevent multiple leading zeros unless it's "0."
+    if (sanitizedValue.length > 1 && sanitizedValue.startsWith('0') && !sanitizedValue.startsWith('0.')) {
+        sanitizedValue = sanitizedValue.substring(1);
+    }
+
+    setTipPercent(sanitizedValue);
+    
+    // Update amount if subtotal > 0
+    if (result) {
+      const total = parseFloat(result.total.replace(/[^0-9.]/g, '')) || 0;
+      const tax = parseFloat(result.tax.replace(/[^0-9.]/g, '')) || 0;
+      const subtotal = total - tax;
+      
+      if (subtotal > 0) {
+        const percent = parseFloat(value) || 0;
+        const newAmount = (percent / 100) * subtotal;
+        setTipAmount(newAmount.toFixed(2));
+      }
+    }
   };
 
   if (error) {
@@ -309,20 +484,20 @@ export default function ResultsScreen() {
         />
         <View style={[styles.container, { paddingTop: insets.top > 0 ? insets.top : 40 }]}>
           <View style={styles.header}>
-            <TouchableOpacity 
-              onPress={() => router.back()} 
+            <TouchableOpacity
+              onPress={() => router.back()}
               style={styles.backButton}
             >
               <Ionicons name="arrow-back" size={24} color={textColor} />
             </TouchableOpacity>
             <ThemedText type="title" style={styles.headerTitle}>Error</ThemedText>
           </View>
-          
+
           <View style={styles.errorCard}>
             <Ionicons name="alert-circle" size={48} color="#FF5722" style={styles.errorIcon} />
             <ThemedText style={styles.errorText}>{error}</ThemedText>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.errorButton}
               onPress={() => router.back()}
               activeOpacity={0.9}
@@ -331,7 +506,7 @@ export default function ResultsScreen() {
                 colors={buttonGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
-                style={styles.buttonGradient}
+                style={styles.doneButtonGradient}
               >
                 <Text style={styles.buttonText}>Go Back</Text>
               </LinearGradient>
@@ -362,7 +537,7 @@ export default function ResultsScreen() {
   // Find the "Me" person
   const mePersonId = people.find(p => p.id === 'me')?.id;
   const meAmount = mePersonId ? result.splitAmounts.find(s => s.personId === mePersonId)?.amount : null;
-  
+
   // Get all other people who owe "Me"
   const peopleWhoOwe = mePersonId ? result.splitAmounts
     .filter(s => s.personId !== mePersonId)
@@ -376,12 +551,12 @@ export default function ResultsScreen() {
     }) : [];
 
   return (
-    <View style={styles.outerContainer}>
+    <ThemedView style={styles.container}>
       <LinearGradient
         colors={backgroundGradient}
         style={styles.background}
       />
-      
+
       {/* Elegant Receipt Modal */}
       <Modal
         animationType="fade"
@@ -396,8 +571,8 @@ export default function ResultsScreen() {
               style={styles.modalGradient}
             >
               <View style={styles.modalHeader}>
-                <ThemedText style={styles.modalTitle}>Receipt Summary</ThemedText>
-                <TouchableOpacity 
+                <ThemedText style={styles.modalTitle}>Receipt Details</ThemedText>
+                <TouchableOpacity
                   style={styles.closeButton}
                   onPress={() => setReceiptModalVisible(false)}
                 >
@@ -406,70 +581,41 @@ export default function ResultsScreen() {
                   </View>
                 </TouchableOpacity>
               </View>
-              
+
               {result && (
-                <View style={styles.modalBody}>
+                <ScrollView
+                  style={styles.modalScrollView}
+                  contentContainerStyle={styles.modalScrollContent}
+                  showsVerticalScrollIndicator={true}
+                >
                   {/* Restaurant Name Section */}
                   <View style={styles.restaurantSection}>
-                    <Ionicons 
-                      name="restaurant-outline" 
-                      size={28} 
-                      color={isDark ? '#3498db' : '#2980b9'} 
+                    <Ionicons
+                      name="restaurant-outline"
+                      size={28}
+                      color={isDark ? '#3498db' : '#2980b9'}
                       style={styles.restaurantIcon}
                     />
                     <View style={styles.restaurantDetails}>
                       <ThemedText style={styles.restaurantName}>
-                        {result.menuItems?.[0]?.name.split(' ')[0] || 'Restaurant'} Receipt
+                        {result.restaurantName}
                       </ThemedText>
                       <ThemedText style={styles.receiptDate}>
-                        {new Date().toLocaleDateString('en-US', { 
-                          weekday: 'short', 
-                          year: 'numeric', 
-                          month: 'short', 
+                        {new Date().toLocaleDateString('en-US', {
+                          weekday: 'short',
+                          year: 'numeric',
+                          month: 'short',
                           day: 'numeric'
                         })}
                       </ThemedText>
                     </View>
                   </View>
-                  
-                  {/* Items Section */}
-                  {result.menuItems && result.menuItems.length > 0 && (
-                    <View style={styles.itemsSection}>
-                      <View style={styles.sectionHeader}>
-                        <Ionicons 
-                          name="list-outline" 
-                          size={20} 
-                          color={isDark ? '#3498db' : '#2980b9'} 
-                        />
-                        <ThemedText style={styles.sectionTitle}>Items</ThemedText>
-                      </View>
-                      
-                      <View style={styles.itemsList}>
-                        {result.menuItems.slice(0, 6).map((item, index) => (
-                          <View key={item.id} style={styles.itemRow}>
-                            <ThemedText style={styles.itemName} numberOfLines={1}>
-                              {item.name}
-                            </ThemedText>
-                            <ThemedText style={styles.itemPrice}>
-                              ${item.price.toFixed(2)}
-                            </ThemedText>
-                          </View>
-                        ))}
-                        
-                        {result.menuItems.length > 6 && (
-                          <ThemedText style={styles.moreItems}>
-                            +{result.menuItems.length - 6} more items
-                          </ThemedText>
-                        )}
-                      </View>
-                    </View>
-                  )}
-                  
-                  {/* Totals Section */}
+
+                  {/* Totals Section - Moved to top for better visibility */}
                   <View style={styles.totalsSection}>
                     <LinearGradient
-                      colors={isDark ? 
-                        ['rgba(52, 152, 219, 0.1)', 'rgba(52, 152, 219, 0.05)'] : 
+                      colors={isDark ?
+                        ['rgba(52, 152, 219, 0.1)', 'rgba(52, 152, 219, 0.05)'] :
                         ['rgba(52, 152, 219, 0.08)', 'rgba(52, 152, 219, 0.03)']}
                       start={{x: 0, y: 0}}
                       end={{x: 0, y: 1}}
@@ -482,7 +628,11 @@ export default function ResultsScreen() {
                         const tip = parseFloat(result.tip.replace(/[^0-9.]/g, '')) || 0;
                         const subtotal = total - tax;
                         const grandTotal = subtotal + tax + tip;
-                        
+
+                        // Calculate tax and tip percentages
+                        const taxPercent = subtotal > 0 ? (tax / subtotal) * 100 : 0;
+                        const tipPercent = subtotal > 0 ? (tip / subtotal) * 100 : 0;
+
                         return (
                           <>
                             <View style={styles.receiptDetailRow}>
@@ -490,11 +640,15 @@ export default function ResultsScreen() {
                               <ThemedText style={styles.receiptDetailValue}>${subtotal.toFixed(2)}</ThemedText>
                             </View>
                             <View style={styles.receiptDetailRow}>
-                              <ThemedText style={styles.receiptDetailLabel}>Tax</ThemedText>
+                              <ThemedText style={styles.receiptDetailLabel}>
+                                Tax <ThemedText style={styles.percentageText}>({taxPercent.toFixed(1)}%)</ThemedText>
+                              </ThemedText>
                               <ThemedText style={styles.receiptDetailValue}>${tax.toFixed(2)}</ThemedText>
                             </View>
                             <View style={styles.receiptDetailRow}>
-                              <ThemedText style={styles.receiptDetailLabel}>Tip</ThemedText>
+                              <ThemedText style={styles.receiptDetailLabel}>
+                                Tip <ThemedText style={styles.percentageText}>({tipPercent.toFixed(1)}%)</ThemedText>
+                              </ThemedText>
                               <ThemedText style={styles.receiptDetailValue}>${tip.toFixed(2)}</ThemedText>
                             </View>
                             <View style={[styles.receiptDetailRow, styles.totalDetailRow]}>
@@ -506,18 +660,110 @@ export default function ResultsScreen() {
                       })()}
                     </LinearGradient>
                   </View>
-                  
-                  {/* Split Info Section */}
+
+                  {/* Split Summary Section */}
+                  <View style={styles.sectionBox}>
+                    <View style={styles.sectionHeader}>
+                      <Ionicons
+                        name="calculator-outline"
+                        size={20}
+                        color={isDark ? '#3498db' : '#2980b9'}
+                      />
+                      <ThemedText style={styles.sectionTitle}>Split Summary</ThemedText>
+                    </View>
+
+                    <View style={styles.splitSummaryContainer}>
+                      {/* Me amount */}
+                      {(() => {
+                        const mePerson = people.find(p => p.id === 'me');
+                        const meAmount = result.splitAmounts.find(s => s.personId === 'me')?.amount;
+
+                        if (mePerson && meAmount) {
+                          return (
+                            <View style={styles.meAmountCard}>
+                              <View style={styles.meHeader}>
+                                <ThemedText style={styles.meHeaderText}>You Pay</ThemedText>
+                              </View>
+                              <ThemedText style={styles.meAmountText}>${meAmount}</ThemedText>
+                            </View>
+                          );
+                        }
+                        return null;
+                      })()}
+
+                      {/* Others' amounts */}
+                      {result.splitAmounts
+                        .filter(split => split.personId !== 'me')
+                        .map((split, index) => {
+                          const person = people.find(p => p.id === split.personId);
+                          if (!person) return null;
+
+                          return (
+                            <View key={person.id} style={styles.otherPersonRow}>
+                              <View style={[styles.personAvatarSmall, { backgroundColor: getPersonColor(index + 1) }]}>
+                                <Text style={styles.personInitialSmall}>{person.name.charAt(0).toUpperCase()}</Text>
+                              </View>
+                              <ThemedText style={styles.otherPersonName}>{person.name}</ThemedText>
+                              <ThemedText style={styles.otherPersonAmount}>${split.amount}</ThemedText>
+                            </View>
+                          );
+                        })
+                      }
+                    </View>
+                  </View>
+
+                  {/* All Items Section - Show all items now */}
+                  {result.menuItems && result.menuItems.length > 0 && (
+                    <View style={styles.itemsSection}>
+                      <View style={styles.sectionHeader}>
+                        <Ionicons
+                          name="list-outline"
+                          size={20}
+                          color={isDark ? '#3498db' : '#2980b9'}
+                        />
+                        <ThemedText style={styles.sectionTitle}>All Items</ThemedText>
+                      </View>
+
+                      <View style={styles.itemsList}>
+                        {result.menuItems.map((item, index) => {
+                          // Get names of people assigned to this item
+                          const assignedPeople = item.assignedTo
+                            .map(id => people.find(p => p.id === id)?.name || '')
+                            .filter(Boolean);
+
+                          return (
+                            <View key={item.id} style={styles.itemRow}>
+                              <View style={styles.itemNameContainer}>
+                                <ThemedText style={styles.itemNameInList}>
+                                  {item.name}
+                                </ThemedText>
+                                {assignedPeople.length > 0 && (
+                                  <ThemedText style={styles.itemPeople}>
+                                    {assignedPeople.join(', ')}
+                                  </ThemedText>
+                                )}
+                              </View>
+                              <ThemedText style={styles.itemPrice}>
+                                ${item.price.toFixed(2)}
+                              </ThemedText>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Split Between Section */}
                   <View style={styles.splitInfoSection}>
                     <View style={styles.sectionHeader}>
-                      <Ionicons 
-                        name="people-outline" 
-                        size={20} 
-                        color={isDark ? '#3498db' : '#2980b9'} 
+                      <Ionicons
+                        name="people-outline"
+                        size={20}
+                        color={isDark ? '#3498db' : '#2980b9'}
                       />
-                      <ThemedText style={styles.sectionTitle}>Split Between</ThemedText>
+                      <ThemedText style={styles.sectionTitle}>People</ThemedText>
                     </View>
-                    
+
                     <View style={styles.peopleGrid}>
                       {people.map((person, index) => (
                         <View key={person.id} style={styles.personBadge}>
@@ -533,35 +779,228 @@ export default function ResultsScreen() {
                       ))}
                     </View>
                   </View>
-                </View>
+                </ScrollView>
               )}
-              
-              <TouchableOpacity 
-                style={styles.doneButton}
-                onPress={() => setReceiptModalVisible(false)}
-              >
-                <LinearGradient
-                  colors={buttonGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.doneButtonGradient}
+
+              <View style={styles.buttonContainer}>
+                <TouchableOpacity
+                  style={styles.doneButton}
+                  onPress={() => setReceiptModalVisible(false)}
                 >
-                  <Text style={styles.doneButtonText}>Close</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+                  <LinearGradient
+                    colors={buttonGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.doneButtonGradient}
+                  >
+                    <Text style={styles.doneButtonText}>Close</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
             </LinearGradient>
           </View>
         </View>
       </Modal>
-      
+
+      {/* Tip Edit Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={tipModalVisible}
+        onRequestClose={handleCloseTipModal}
+      >
+        <View style={styles.modalContainer}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.keyboardAvoidingView}
+          >
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+              <Animated.View style={[
+                styles.tipModalContent,
+                {
+                opacity: tipModalAnimation,
+                transform: [
+                  {
+                    scale: tipModalAnimation.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.9, 1]
+                    })
+                  }
+                ],
+                backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF'
+              }
+            ]}>
+              <View style={styles.modalHeader}>
+                <ThemedText style={styles.modalTitle}>
+                  Edit Tip
+                </ThemedText>
+                <TouchableOpacity
+                  style={styles.closeButton}
+                  onPress={handleCloseTipModal}
+                >
+                  <View style={styles.closeButtonCircle}>
+                    <Ionicons name="close" size={20} color={isDark ? '#fff' : '#000'} />
+                  </View>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.tipModalBody}>
+                {result && (() => {
+                  // Calculate subtotal for reference
+                  const total = parseFloat(result.total.replace(/[^0-9.]/g, '')) || 0;
+                  const tax = parseFloat(result.tax.replace(/[^0-9.]/g, '')) || 0;
+                  const subtotal = total - tax;
+
+                  return (
+                    <View style={styles.tipModalContentInner}>
+                      <ThemedText style={styles.subtotalText}>
+                        Subtotal: ${subtotal.toFixed(2)}
+                      </ThemedText>
+                      
+                      <View style={styles.tipOptionsContainer}>
+                        <TouchableOpacity
+                          style={[
+                            styles.tipOptionTab,
+                            activeTipOption === 'percent' && styles.activeTipOption
+                          ]}
+                          onPress={() => setActiveTipOption('percent')}
+                        >
+                          <ThemedText style={[
+                            styles.tipOptionText,
+                            activeTipOption === 'percent' && styles.activeTipOptionText
+                          ]}>
+                            Percentage
+                          </ThemedText>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity
+                          style={[
+                            styles.tipOptionTab,
+                            activeTipOption === 'amount' && styles.activeTipOption
+                          ]}
+                          onPress={() => setActiveTipOption('amount')}
+                        >
+                          <ThemedText style={[
+                            styles.tipOptionText,
+                            activeTipOption === 'amount' && styles.activeTipOptionText
+                          ]}>
+                            Amount
+                          </ThemedText>
+                        </TouchableOpacity>
+                      </View>
+                      
+                      {activeTipOption === 'percent' ? (
+                        <View style={styles.inputGroup}>
+                          <ThemedText style={styles.inputLabel}>Tip Percentage</ThemedText>
+                          <View style={[
+                            styles.modalInputWrapper,
+                            activeTipOption === 'percent' && styles.modalInputWrapperActive
+                          ]}>
+                            <TextInput
+                              style={[styles.modalTextInput, { color: textColor }]}
+                              placeholder="15.00"
+                              placeholderTextColor={isDark ? '#777' : '#999'}
+                              value={tipPercent}
+                              onChangeText={handleTipPercentChange}
+                              keyboardType="decimal-pad"
+                              returnKeyType="done"
+                              onSubmitEditing={Keyboard.dismiss}
+                              blurOnSubmit={true}
+                            />
+                            <ThemedText style={[styles.modalInputSymbol, { marginLeft: 8, color: textColor }]}>%</ThemedText>
+                          </View>
+                          <ThemedText style={styles.tipAmountPreview}>
+                            Tip amount: ${parseFloat(tipAmount) > 0 ? parseFloat(tipAmount).toFixed(2) : (tipAmount === '' || tipAmount === '0' || tipAmount === '0.' || tipAmount === '0.0' || tipAmount === '0.00' ? '0.00' : tipAmount)}
+                          </ThemedText>
+                        </View>
+                      ) : (
+                        <View style={styles.inputGroup}>
+                          <ThemedText style={styles.inputLabel}>Tip Amount</ThemedText>
+                          <View style={[
+                            styles.modalInputWrapper,
+                            activeTipOption === 'amount' && styles.modalInputWrapperActive
+                          ]}>
+                            <ThemedText style={[styles.modalInputSymbol, { marginRight: 8, color: textColor }]}>$</ThemedText>
+                            <TextInput
+                              style={[styles.modalTextInput, { color: textColor }]}
+                              placeholder="0.00"
+                              placeholderTextColor={isDark ? '#777' : '#999'}
+                              value={tipAmount}
+                              onChangeText={handleTipAmountChange}
+                              keyboardType="decimal-pad"
+                              returnKeyType="done"
+                              onSubmitEditing={Keyboard.dismiss}
+                              blurOnSubmit={true}
+                            />
+                          </View>
+                          <ThemedText style={styles.tipPercentPreview}>
+                            {parseFloat(tipPercent) > 0 ? `${parseFloat(tipPercent).toFixed(2)}% of subtotal` : 'No tip'}
+                          </ThemedText>
+                        </View>
+                      )}
+                      
+                      {/* Quick tip options */}
+                      <View style={styles.quickTipContainer}>
+                        <ThemedText style={styles.quickTipLabel}>Quick Options:</ThemedText>
+                        <View style={styles.quickTipOptions}>
+                          {[15, 18, 20, 25].map(percent => (
+                            <TouchableOpacity
+                              key={`tip-${percent}`}
+                              style={[
+                                styles.quickTipButton,
+                                { backgroundColor: isDark ? 'rgba(70, 70, 70, 0.5)' : 'rgba(225, 225, 225, 0.5)' }, // Default background
+                                activeTipOption === 'percent' && tipPercent === percent.toString() && styles.quickTipButtonSelected
+                              ]}
+                              onPress={() => {
+                                setTipPercent(percent.toString());
+                                handleTipPercentChange(percent.toString()); // This will also update tipAmount
+                                setActiveTipOption('percent');
+                              }}
+                            >
+                              <ThemedText style={[
+                                styles.quickTipText,
+                                { color: textColor }, // Ensure default theme color
+                                activeTipOption === 'percent' && tipPercent === percent.toString() && styles.quickTipTextSelected
+                              ]}>{percent}%</ThemedText>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })()}
+              </View>
+
+              <View style={styles.tipModalFooter}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={handleCloseTipModal}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton]} // saveButton provides bg color
+                  onPress={handleUpdateTip}
+                >
+                  {/* LinearGradient removed */}
+                  <Text style={styles.saveButtonText}>Update Tip</Text>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+            </TouchableWithoutFeedback>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
       <View style={styles.container}>
         <Animated.View style={{ opacity: fadeIn }}>
           <SafeAreaHeader
             title="Final Split"
-            onBack={() => router.back()}
+            onBack={() => router.replace('/split/tip')}
           />
         </Animated.View>
-        
+
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
           {/* Bill Details Card */}
           <Animated.View style={{
@@ -569,7 +1008,7 @@ export default function ResultsScreen() {
             transform: [{ translateY: slideUp }]
           }}>
             <View style={styles.cardContainer}>
-              <LinearGradient 
+              <LinearGradient
                 colors={cardGradient}
                 style={styles.cardGradient}
                 start={{ x: 0, y: 0 }}
@@ -580,7 +1019,7 @@ export default function ResultsScreen() {
                     <Ionicons name="receipt-outline" size={24} color="#3498db" />
                     <ThemedText style={styles.totalTitle}>Bill Details</ThemedText>
                   </View>
-                  
+
                   {/* Calculate values ensuring tip is included */}
                   {(() => {
                     const total = parseFloat(result.total.replace(/[^0-9.]/g, '')) || 0;
@@ -588,14 +1027,14 @@ export default function ResultsScreen() {
                     const tip = parseFloat(result.tip.replace(/[^0-9.]/g, '')) || 0;
                     const subtotal = total - tax;
                     const grandTotal = subtotal + tax + tip;
-                    
+
                     // Log the values for debugging
                     console.log('Results screen bill details:');
                     console.log(`Subtotal: $${subtotal.toFixed(2)}`);
                     console.log(`Tax: $${tax.toFixed(2)}`);
                     console.log(`Tip: $${tip.toFixed(2)}`);
                     console.log(`Total with tip: $${grandTotal.toFixed(2)}`);
-                    
+
                     return (
                       <>
                         <View style={styles.totalRow}>
@@ -608,7 +1047,16 @@ export default function ResultsScreen() {
                         </View>
                         <View style={styles.totalRow}>
                           <ThemedText>Tip:</ThemedText>
-                          <ThemedText style={styles.amountText}>${tip.toFixed(2)}</ThemedText>
+                          <View style={styles.tipContainer}>
+                            <ThemedText style={styles.amountText}>${tip.toFixed(2)}</ThemedText>
+                            <TouchableOpacity
+                              style={styles.editTipButton}
+                              onPress={handleOpenTipModal}
+                            >
+                              <Ionicons name="pencil-outline" size={14} color="#3498db" />
+                              <ThemedText style={styles.editTipText}>Edit</ThemedText>
+                            </TouchableOpacity>
+                          </View>
                         </View>
                         <View style={[styles.totalRow, styles.totalFinal]}>
                           <ThemedText style={styles.totalText}>Total:</ThemedText>
@@ -619,12 +1067,12 @@ export default function ResultsScreen() {
                       </>
                     );
                   })()}
-                  
+
                 </View>
               </LinearGradient>
             </View>
           </Animated.View>
-          
+
           {/* You Pay Card */}
           {meAmount && (
             <Animated.View style={{
@@ -637,7 +1085,7 @@ export default function ResultsScreen() {
             }}>
               <View style={styles.youPayContainer}>
                 <LinearGradient
-                  colors={youPayGradient}
+                  colors={buttonGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.youPayGradient}
@@ -652,7 +1100,7 @@ export default function ResultsScreen() {
               </View>
             </Animated.View>
           )}
-          
+
           {/* People Owe You Card */}
           <Animated.View style={{
             opacity: fadeIn,
@@ -660,7 +1108,7 @@ export default function ResultsScreen() {
             marginBottom: 16
           }}>
             <View style={styles.cardContainer}>
-              <LinearGradient 
+              <LinearGradient
                 colors={cardGradient}
                 style={styles.cardGradient}
                 start={{ x: 0, y: 0 }}
@@ -671,7 +1119,7 @@ export default function ResultsScreen() {
                     <Ionicons name="people-outline" size={24} color="#3498db" />
                     <ThemedText style={styles.splitTitle}>People Owe You</ThemedText>
                   </View>
-                  
+
                   {peopleWhoOwe.length === 0 ? (
                     <View style={styles.emptyState}>
                       <Ionicons name="checkmark-circle" size={36} color="#2ecc71" style={styles.emptyIcon} />
@@ -684,7 +1132,7 @@ export default function ResultsScreen() {
                       {peopleWhoOwe.map((person, index) => (
                         <Animated.View key={person.id} style={{
                           opacity: staggeredItems[index] || fadeIn,
-                          transform: [{ 
+                          transform: [{
                             translateX: (staggeredItems[index] || fadeIn).interpolate({
                               inputRange: [0, 1],
                               outputRange: [50, 0]
@@ -705,7 +1153,7 @@ export default function ResultsScreen() {
                           </View>
                         </Animated.View>
                       ))}
-                      
+
                       {/* Verification total row */}
                       {(() => {
                         // Calculate the sum of all shares
@@ -713,36 +1161,36 @@ export default function ResultsScreen() {
                         if (meAmount) {
                           sumOfAllShares = parseFloat(meAmount);
                         }
-                        
+
                         peopleWhoOwe.forEach(person => {
                           sumOfAllShares += parseFloat(person.amount);
                         });
-                        
+
                         // Get the expected total (including tip)
                         const total = parseFloat(result.total.replace(/[^0-9.]/g, '')) || 0;
                         const tax = parseFloat(result.tax.replace(/[^0-9.]/g, '')) || 0;
                         const tip = parseFloat(result.tip.replace(/[^0-9.]/g, '')) || 0;
                         const subtotal = total - tax;
                         const expectedTotal = subtotal + tax + tip;
-                        
+
                         // Calculate difference
                         const difference = Math.abs(expectedTotal - sumOfAllShares);
                         const isBalanced = difference < 0.02; // Allow for small rounding errors
-                        
+
                         // Log values for debugging
                         console.log('Verification check:');
                         console.log(`Sum of all shares: $${sumOfAllShares.toFixed(2)}`);
                         console.log(`Expected total (subtotal + tax + tip): $${expectedTotal.toFixed(2)}`);
                         console.log(`Difference: $${difference.toFixed(2)}`);
                         console.log(`Is balanced: ${isBalanced}`);
-                        
+
                         return (
                           <View style={styles.verificationRow}>
                             <ThemedText style={styles.verificationText}>
                               Total contributions: ${sumOfAllShares.toFixed(2)}
                             </ThemedText>
                             <ThemedText style={[
-                              styles.verificationStatus, 
+                              styles.verificationStatus,
                               {color: isBalanced ? '#2ecc71' : '#e74c3c'}
                             ]}>
                               {isBalanced ? '✓ Balanced' : `Unbalanced by $${difference.toFixed(2)}`}
@@ -756,12 +1204,12 @@ export default function ResultsScreen() {
               </LinearGradient>
             </View>
           </Animated.View>
-          
+
           {/* Items Breakdown Card */}
           {result.menuItems && result.menuItems.length > 0 && (
             <Animated.View style={{
               opacity: fadeIn,
-              transform: [{ 
+              transform: [{
                 translateY: fadeIn.interpolate({
                   inputRange: [0, 1],
                   outputRange: [70, 0]
@@ -770,7 +1218,7 @@ export default function ResultsScreen() {
               marginBottom: 16
             }}>
               <View style={styles.cardContainer}>
-                <LinearGradient 
+                <LinearGradient
                   colors={cardGradient}
                   style={styles.cardGradient}
                   start={{ x: 0, y: 0 }}
@@ -783,7 +1231,7 @@ export default function ResultsScreen() {
                           <Ionicons name="list-outline" size={24} color="#3498db" />
                           <ThemedText style={styles.itemsTitle}>Items Breakdown</ThemedText>
                         </View>
-                        <TouchableOpacity 
+                        <TouchableOpacity
                           onPress={handleEditItems}
                           style={styles.editButton}
                         >
@@ -791,17 +1239,17 @@ export default function ResultsScreen() {
                           <ThemedText style={styles.editLink}>Edit</ThemedText>
                         </TouchableOpacity>
                       </View>
-                      
+
                       {/* Calculate tax and tip rates for explanation */}
                       {(() => {
                         const total = parseFloat(result.total.replace(/[^0-9.]/g, '')) || 0;
                         const tax = parseFloat(result.tax.replace(/[^0-9.]/g, '')) || 0;
                         const tip = parseFloat(result.tip.replace(/[^0-9.]/g, '')) || 0;
                         const subtotal = total - tax;
-                        
+
                         const taxRate = (tax / subtotal) * 100;
                         const tipRate = (tip / subtotal) * 100;
-                        
+
                         return (
                           <View style={styles.ratesSummary}>
                             <ThemedText style={styles.rateText}>
@@ -814,41 +1262,41 @@ export default function ResultsScreen() {
                         );
                       })()}
                     </View>
-                    
+
                     {(() => {
-                      // Calculate tax and tip rates 
+                      // Calculate tax and tip rates
                       const total = parseFloat(result.total.replace(/[^0-9.]/g, '')) || 0;
                       const tax = parseFloat(result.tax.replace(/[^0-9.]/g, '')) || 0;
                       const tip = parseFloat(result.tip.replace(/[^0-9.]/g, '')) || 0;
                       const subtotal = total - tax;
-                      
+
                       // Calculate the proportion of tax and tip to subtotal
                       const taxProportion = tax / subtotal;
                       const tipProportion = tip / subtotal;
-                      
+
                       return result.menuItems.map((item, index) => {
-                        const assignedPeople = item.assignedTo.map(id => 
+                        const assignedPeople = item.assignedTo.map(id =>
                           people.find(p => p.id === id)?.name || ''
                         ).join(', ');
-                        
+
                         // Calculate item's proportional tax and tip
                         const itemTax = item.price * taxProportion;
                         const itemTip = item.price * tipProportion;
                         const itemTotal = item.price + itemTax + itemTip;
-                        
+
                         // Calculate per-person cost if assigned
                         let perPersonCost = 0;
                         let perPersonSubtotal = 0;
                         let perPersonTax = 0;
                         let perPersonTip = 0;
-                        
+
                         if (item.assignedTo.length > 0) {
                           perPersonSubtotal = item.price / item.assignedTo.length;
                           perPersonTax = itemTax / item.assignedTo.length;
                           perPersonTip = itemTip / item.assignedTo.length;
                           perPersonCost = itemTotal / item.assignedTo.length;
                         }
-                        
+
                         return (
                           <Animated.View key={item.id} style={{
                             opacity: fadeIn,
@@ -862,24 +1310,24 @@ export default function ResultsScreen() {
                           }}>
                             <View style={styles.itemRow}>
                               <View style={styles.itemDetails}>
-                                <ThemedText style={styles.itemName}>{item.name}</ThemedText>
+                                <ThemedText style={styles.itemNameInList}>{item.name}</ThemedText>
                                 <View>
                                   <ThemedText style={styles.itemAssigned}>
-                                    {item.assignedTo.length > 0 
-                                      ? `Assigned to: ${assignedPeople}` 
+                                    {item.assignedTo.length > 0
+                                      ? `Assigned to: ${assignedPeople}`
                                       : 'Unassigned (split equally)'}
                                   </ThemedText>
                                   <ThemedText style={styles.itemWithTaxTip}>
                                     After tax & tip: ${itemTotal.toFixed(2)}
                                     {item.assignedTo.length > 0 && (
-                                      item.assignedTo.length > 1 
+                                      item.assignedTo.length > 1
                                         ? ` ($${perPersonCost.toFixed(2)} each)`
                                         : ``
                                     )}
                                   </ThemedText>
                                   <ThemedText style={styles.itemBreakdown}>
-                                    {item.assignedTo.length > 0 
-                                      ? `Per person: $${perPersonSubtotal.toFixed(2)} + $${perPersonTax.toFixed(2)} tax + $${perPersonTip.toFixed(2)} tip = $${perPersonCost.toFixed(2)}` 
+                                    {item.assignedTo.length > 0
+                                      ? `Per person: $${perPersonSubtotal.toFixed(2)} + $${perPersonTax.toFixed(2)} tax + $${perPersonTip.toFixed(2)} tip = $${perPersonCost.toFixed(2)}`
                                       : 'Split equally among everyone'
                                     }
                                   </ThemedText>
@@ -898,12 +1346,12 @@ export default function ResultsScreen() {
               </View>
             </Animated.View>
           )}
-          
+
           {/* Receipt Button */}
           {receiptImage && (
             <Animated.View style={{
               opacity: fadeIn,
-              transform: [{ 
+              transform: [{
                 translateY: fadeIn.interpolate({
                   inputRange: [0, 1],
                   outputRange: [90, 0]
@@ -911,7 +1359,7 @@ export default function ResultsScreen() {
               }],
               marginBottom: 16
             }}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.receiptButton}
                 onPress={() => setReceiptModalVisible(true)}
                 activeOpacity={0.8}
@@ -921,11 +1369,11 @@ export default function ResultsScreen() {
               </TouchableOpacity>
             </Animated.View>
           )}
-          
+
           {/* Action Buttons */}
           <Animated.View style={{
             opacity: fadeIn,
-            transform: [{ 
+            transform: [{
               translateY: fadeIn.interpolate({
                 inputRange: [0, 1],
                 outputRange: [100, 0]
@@ -934,7 +1382,7 @@ export default function ResultsScreen() {
             marginBottom: 30
           }}>
             <View style={styles.actions}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleShareResults}
                 activeOpacity={0.9}
@@ -949,8 +1397,8 @@ export default function ResultsScreen() {
                   <Text style={styles.actionText}>Share Results</Text>
                 </LinearGradient>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleNewSplit}
                 activeOpacity={0.9}
@@ -961,19 +1409,41 @@ export default function ResultsScreen() {
                   end={{ x: 1, y: 0 }}
                   style={styles.actionGradient}
                 >
-                  <Ionicons name="add-circle-outline" size={22} color="#ffffff" />
-                  <Text style={styles.actionText}>New Split</Text>
+                  <Ionicons name="checkmark-circle-outline" size={22} color="#ffffff" />
+                  <Text style={styles.actionText}>Complete</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
           </Animated.View>
         </ScrollView>
       </View>
-    </View>
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
+  tipContainer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+  editTipButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 10,
+    backgroundColor: "rgba(52, 152, 219, 0.1)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  editTipText: {
+    fontSize: 12,
+    color: "#3498db",
+    marginLeft: 4,
+    fontFamily: "InterMedium",
+  },
   outerContainer: {
     flex: 1,
     width: '100%',
@@ -987,7 +1457,7 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    paddingBottom: 36, // Add extra padding at the bottom to prevent buttons from getting cut off
+    paddingBottom: 0, // Remove bottom padding as there's nothing there
   },
   // Modal styles
   modalContainer: {
@@ -1026,8 +1496,14 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(150, 150, 150, 0.1)',
   },
   modalTitle: {
+    flex: 1, // Allow title to take available space
+    textAlign: 'center', // Center the title text
     fontSize: 24,
     fontWeight: 'bold',
+    // Add a small left margin if the close button is on the right to balance it out
+    // This assumes the close button is on the right. If it's on the left, this isn't needed.
+    // Or, ensure the close button has a defined width and add a spacer on the other side.
+    // For now, let's just center the text. If it's still off, we'll refine.
   },
   closeButton: {
     padding: 5,
@@ -1040,8 +1516,96 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  modalScrollView: {
+    flex: 1,
+  },
+  modalScrollContent: {
+    padding: 24,
+    paddingBottom: 40,
+  },
+  buttonContainer: {
+    padding: 16,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(150, 150, 150, 0.1)',
+  },
   modalBody: {
     padding: 24,
+  },
+  sectionBox: {
+    backgroundColor: 'rgba(150, 150, 150, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  },
+  percentageText: {
+    fontSize: 12,
+    opacity: 0.7,
+    fontFamily: 'InterRegular',
+  },
+  splitSummaryContainer: {
+    marginTop: 12,
+  },
+  meAmountCard: {
+    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  meHeader: {
+    marginBottom: 8,
+  },
+  meHeaderText: {
+    fontSize: 16,
+    fontFamily: 'InterMedium',
+  },
+  meAmountText: {
+    fontSize: 28,
+    fontFamily: 'InterBold',
+    color: '#3498db',
+  },
+  otherPersonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    backgroundColor: 'rgba(150, 150, 150, 0.05)',
+    padding: 12,
+    borderRadius: 10,
+  },
+  personAvatarSmall: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  personInitialSmall: {
+    color: 'white',
+    fontSize: 16,
+    fontFamily: 'InterSemiBold',
+  },
+  otherPersonName: {
+    flex: 1,
+    fontSize: 16,
+    fontFamily: 'InterMedium',
+  },
+  otherPersonAmount: {
+    fontSize: 18,
+    fontFamily: 'InterBold',
+    color: '#3498db',
+  },
+  itemNameContainer: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  itemPeople: {
+    fontSize: 12,
+    fontFamily: 'InterRegular',
+    marginTop: 4,
+    opacity: 0.7,
+    color: '#3498db',
   },
   // Restaurant section
   restaurantSection: {
@@ -1171,23 +1735,27 @@ const styles = StyleSheet.create({
     maxWidth: '45%',
   },
   personAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#3498db',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
   },
   personInitial: {
-    color: '#fff',
+    fontSize: 20,
     fontWeight: 'bold',
-    fontSize: 14,
+    color: '#ffffff',
   },
   personBadgeName: {
     fontSize: 14,
     flex: 1,
   },
-  // Button
   doneButton: {
     width: '90%',
     alignSelf: 'center',
@@ -1243,6 +1811,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   cardContainer: {
+    width: '90%',
+    alignSelf: 'center',
     borderRadius: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -1359,42 +1929,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(0, 0, 0, 0.05)',
   },
-  personAvatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: '#3498db',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-  },
-  personInitial: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#ffffff',
-  },
-  personDetails: {
-    flex: 1,
-  },
-  personName: {
-    fontSize: 18,
-    fontFamily: 'InterSemiBold',
-    marginBottom: 4,
-  },
-  personNote: {
-    fontSize: 14,
-    opacity: 0.6,
-    fontFamily: 'InterRegular',
-  },
-  personAmount: {
-    fontSize: 20,
-    fontFamily: 'InterBold',
-    color: '#3498db',
-  },
   verificationRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1458,49 +1992,49 @@ const styles = StyleSheet.create({
     fontFamily: 'InterSemiBold',
     marginLeft: 4,
   },
-  itemRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0, 0, 0, 0.05)',
-  },
-  itemDetails: {
+  // itemRow: { // DUPLICATE - REMOVED
+  //   flexDirection: 'row',
+  //   justifyContent: 'space-between',
+  //   alignItems: 'center',
+  //   paddingVertical: 14,
+  //   borderBottomWidth: 1,
+  //   borderBottomColor: 'rgba(0, 0, 0, 0.05)',
+  // },
+  itemDetails: { // This style was between the duplicates, keeping it.
     flex: 1,
     paddingRight: 12,
   },
-  itemName: {
-    fontSize: 16,
-    marginBottom: 4,
-    fontFamily: 'InterMedium',
-  },
-  itemAssigned: {
+  // itemName: { // DUPLICATE - REMOVED
+  //   fontSize: 16,
+  //   marginBottom: 4,
+  //   fontFamily: 'InterMedium',
+  // },
+  itemAssigned: { // This style was between the duplicates, keeping it.
     fontSize: 14,
     opacity: 0.6,
     fontFamily: 'InterRegular',
   },
-  itemWithTaxTip: {
+  itemWithTaxTip: { // This style was between the duplicates, keeping it.
     fontSize: 14,
     marginTop: 2,
     color: '#3498db', // Blue color for emphasis
     fontFamily: 'InterMedium',
   },
-  itemBreakdown: {
+  itemBreakdown: { // This style was between the duplicates, keeping it.
     fontSize: 12,
     marginTop: 2,
     color: '#888',
     fontStyle: 'italic',
     fontFamily: 'InterRegular',
   },
-  itemPriceContainer: {
+  itemPriceContainer: { // This style was between the duplicates, keeping it.
     alignItems: 'flex-end',
     justifyContent: 'center',
   },
-  itemPrice: {
-    fontSize: 16,
-    fontFamily: 'InterSemiBold',
-  },
+  // itemPrice: { // DUPLICATE - REMOVED
+  //   fontSize: 16,
+  //   fontFamily: 'InterSemiBold',
+  // },
   receiptButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1523,30 +2057,36 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginBottom: 16,
   },
   actionButton: {
     flex: 1,
-    marginHorizontal: 6,
     borderRadius: 12,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 5,
+    shadowRadius: 5,
+    elevation: 4,
+    marginHorizontal: 6,
   },
   actionGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 16,
-    paddingHorizontal: 8,
   },
   actionText: {
     color: '#ffffff',
-    fontWeight: 'bold',
     fontSize: 16,
-    marginLeft: 10,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  buttonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   errorCard: {
     margin: 20,
@@ -1581,15 +2121,232 @@ const styles = StyleSheet.create({
     elevation: 5,
     marginTop: 8,
   },
-  buttonGradient: {
+  personDetails: {
+    flex: 1,
+    marginRight: 8,
+  },
+  personName: {
+    fontSize: 18,
+    fontFamily: 'InterSemiBold',
+    marginBottom: 4,
+  },
+  personNote: {
+    fontSize: 14,
+    opacity: 0.6,
+    fontFamily: 'InterRegular',
+  },
+  personAmount: {
+    fontSize: 20,
+    fontFamily: 'InterBold',
+    color: '#3498db',
+  },
+  tipModalContent: {
+    width: '100%',
+    maxHeight: '90%',
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  tipModalBody: {
+    padding: 24,
+  },
+  tipModalContentInner: {
+    padding: 24,
+  },
+  subtotalText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  tipOptionsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  tipOptionTab: {
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(150, 150, 150, 0.2)',
+    borderRadius: 12,
+  },
+  activeTipOption: {
+    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+  },
+  tipOptionText: {
+    fontSize: 14,
+    fontFamily: 'InterMedium',
+  },
+  activeTipOptionText: {
+    fontWeight: 'bold',
+  },
+  inputGroup: {
+    marginBottom: 16,
+    minHeight: 120, // Add minHeight to prevent layout shift
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontFamily: 'InterMedium',
+    marginBottom: 4,
+  },
+  // New styles for consistent input fields in modal
+  modalInputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
+    backgroundColor: 'rgba(150, 150, 150, 0.08)', // Slightly adjusted for modal context
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    // paddingVertical: 12, // Vertical padding will be controlled by height
+    height: 56, // Slightly smaller than tip.tsx's 60 for modal
+    flex: 1,
+    borderWidth: 1, // Default border
+    borderColor: 'transparent', // Default border transparent
   },
-  buttonText: {
-    color: '#fff',
-    fontWeight: 'bold',
+  modalInputWrapperActive: {
+    // borderColor: '#3498db', // Temporarily remove border to test "blue line" issue
+    backgroundColor: 'rgba(52, 152, 219, 0.15)', // Keep active background, made it a bit more visible
+  },
+  modalInputSymbol: {
+    fontSize: 18,
+    fontFamily: 'InterSemiBold',
+    opacity: 0.7,
+    // marginRight or marginLeft will be applied inline for $ vs %
+  },
+  modalTextInput: {
+    flex: 1,
+    fontSize: 18,
+    fontFamily: 'InterRegular',
+    height: '100%', // Take full height of wrapper
+    // paddingVertical: 0, // Remove TextInput's own vertical padding if wrapper controls height
+  },
+  // End of new styles
+  percentInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  percentInput: {
+    flex: 1,
+    padding: 12,
+  },
+  percentSign: {
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  tipAmountPreview: {
+    fontSize: 12,
+    opacity: 0.7,
+    marginTop: 4,
+    textDecorationLine: 'none', // Explicitly remove text decoration
+  },
+  amountInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  amountInput: {
+    flex: 1,
+    padding: 12,
+  },
+  dollarSign: {
+    fontSize: 14,
+    marginRight: 8,
+  },
+  tipPercentPreview: {
+    fontSize: 12,
+    opacity: 0.7,
+    marginTop: 4,
+    textDecorationLine: 'none', // Explicitly remove text decoration
+  },
+  quickTipContainer: {
+    marginTop: 16,
+  },
+  quickTipLabel: {
+    fontSize: 14,
+    fontFamily: 'InterMedium',
+    marginBottom: 8,
+  },
+  quickTipOptions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  quickTipButton: {
+    flex: 1, // Allow buttons to share space
+    alignItems: 'center', // Center text
+    paddingVertical: 12,
+    paddingHorizontal: 8, // Adjust horizontal padding
+    borderWidth: 1,
+    borderColor: 'rgba(150, 150, 150, 0.2)', // Default border
+    borderRadius: 12,
+    marginHorizontal: 4, // Add some spacing between buttons
+    // backgroundColor will be applied dynamically in JSX
+  },
+  quickTipButtonSelected: {
+    backgroundColor: 'rgba(52, 152, 219, 0.15)',
+    borderColor: '#3498db',
+  },
+  quickTipText: {
+    fontSize: 16, // Increased font size
+    fontFamily: 'InterSemiBold', // Make it bolder
+    // color will be handled by ThemedText or selected style
+  },
+  quickTipTextSelected: {
+    color: '#3498db',
+  },
+  tipModalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-around', // Changed from space-between for better balance
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(150, 150, 150, 0.1)',
+  },
+  modalButton: {
+    flex: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+    elevation: 4,
+    marginHorizontal: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 12, // Reduced padding
+  },
+  cancelButton: {
+    backgroundColor: 'rgba(150, 150, 150, 0.1)',
+    // No specific padding here, will inherit from modalButton
+  },
+  cancelButtonText: {
+    color: '#ffffff', // This color might be an issue in light mode if the button bg is light
     fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center', // Center the text within the button
+  },
+  saveButton: {
+    backgroundColor: '#3498db',
+  },
+  saveButtonGradient: { // This style is no longer used by the save button directly
+    alignItems: 'center',
+    justifyContent: 'center',
+    // paddingVertical: 16, // Removed as padding is now on modalButton
+  },
+  saveButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  keyboardAvoidingView: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  itemNameInList: {
+    fontSize: 16,
+    marginBottom: 4,
+    fontFamily: 'InterMedium',
   },
 });

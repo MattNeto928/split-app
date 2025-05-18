@@ -2,12 +2,19 @@
   "expo": {
     "name": "Split",
     "slug": "split-app",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/f3c0ee63-9ac6-4802-8743-0771f681d68e"
+    },
+    "runtimeVersion": "1.0.0",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.mattneto.Split",
@@ -16,14 +23,16 @@
           "expo-development-client",
           "exp"
         ]
-      }
+      },
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.mattneto.Split"
+      "package": "com.mattneto.Split",
+      "versionCode": 1
     },
     "web": {
       "bundler": "metro",

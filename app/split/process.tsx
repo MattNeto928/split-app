@@ -161,29 +161,23 @@ export default function ProcessScreen() {
   
   // Use a single, stable navigation approach
   useEffect(() => {
-    console.log('Process screen result effect running, checking data...');
-    
-    // Only log this once per component mount for debugging
+    // Only log this once when data changes
     const hasResult = result && result.menuItems && result.menuItems.length > 0;
-    console.log(`Process screen has result: ${hasResult}, mounted: ${isMounted.current}, has navigated: ${hasNavigated.current}`);
     
     // ONLY navigate if we have valid data and haven't navigated yet
     if (hasResult && !hasNavigated.current && isMounted.current) {
-      console.log('Navigation: Valid data detected, navigating once');
+      console.log('Navigation: Valid data detected, navigating to items screen');
       
       // Set navigation flag to prevent multiple attempts
       hasNavigated.current = true;
       
       // Use a SINGLE navigation method for consistency
       router.push('/split/items');
-      
-      console.log('Navigation completed to items screen');
     }
   }, [result, router]);
   
   // REPLACED BY THE RESULT WATCHER EFFECT - This function is now a no-op
   const navigateToItemsScreen = useCallback(() => {
-    console.log('⚠️ Old navigateToItemsScreen function called - using result watcher instead');
     // This function does nothing now - all navigation is handled by the result watcher effect
   }, []); // No dependencies needed
   
@@ -194,13 +188,7 @@ export default function ProcessScreen() {
   
   useEffect(() => {
     // Run the API call with our stylish animation
-    console.log('🔥 MAKING API CALL WITH STYLISH ANIMATION');
-    
-    // Log if we're using mock data or real API
-    console.log('Using mock data setting:', useMockData ? 'TRUE (using mock data)' : 'FALSE (using real API)');
-    
-    // No need for safety timers with our improved animation
-    const safetyTimer = null;
+    console.log('Making API call for receipt analysis');
     
     // Create a timer for navigation if no image
     let timer: NodeJS.Timeout | null = null;
@@ -217,45 +205,27 @@ export default function ProcessScreen() {
         }
       }, 300);
     }
-    // Continue with normal flow if we have an image - DO NOT USE early return
     
     // Process the receipt image
     const processReceipt = async () => {
-      // Log that we're entering the process function
-      console.log('🔍 ENTERING processReceipt() function to analyze receipt image');
-      
-      // Remove guard to ensure processing always happens
-      // We still keep the flag for debugging purposes
-      if (processingRef.current) {
-        console.log('⚠️ Already processing, but proceeding anyway to ensure API call is made');
+      // Only log if not already processing
+      if (!processingRef.current) {
+        console.log('Starting receipt image analysis');
       }
       
       // Set the processing flag immediately
       processingRef.current = true;
-      console.log('🚀 Starting Gemini API processing for receipt image');
       
       try {
-        // Remove guard to ensure API call always happens
-        if (!isMounted.current) {
-          console.log('⚠️ Component not mounted but proceeding with API call anyway');
-        }
-        
-        console.log('Starting receipt analysis with Gemini...', { 
-          imageExists: !!receiptImage,
-          imageLength: receiptImage ? receiptImage.length : 0,
-          imageStart: receiptImage ? receiptImage.substring(0, 30) + '...' : 'none'
-        });
-        
         // Verify receipt image exists and is valid unless using mock data
         if (!useMockData && (!receiptImage || typeof receiptImage !== 'string' || !receiptImage.startsWith('data:image'))) {
-          console.error('Invalid receipt image format:', receiptImage?.substring(0, 50) + '...');
-          console.log('⚠️ Using mock data because receipt image is invalid');
+          console.error('Invalid receipt image format');
           throw new Error('Invalid receipt image format');
         }
         
         // Use mock data if flag is set or if we're in development and want to test
         if (useMockData) {
-          console.log('Using mock data by request');
+          console.log('Using mock data');
           const mockResult = generateMockResult();
           setSplitResult(mockResult);
           
@@ -267,26 +237,11 @@ export default function ProcessScreen() {
             if (!isMounted.current) return;
             
             recalculateSplitAmounts();
-            console.log('Mock data set, recalculated, now navigating to items');
             
-            // Force a longer delay and check the result state before navigation
+            // Force a longer delay before navigation
             setTimeout(() => {
               if (!isMounted.current) return;
-              
-              // Log the current state of the result
-              console.log('Checking result before navigation:', {
-                hasResult: !!result,
-                hasSplitAmounts: result?.splitAmounts?.length > 0,
-                menuItemsCount: result?.menuItems?.length,
-                total: result?.total,
-                people: people.length
-              });
-              
-              // Navigate to items with mock data
-              if (isMounted.current) {
-                console.log('Attempting navigation to items screen with mock data...');
-                navigateToItemsScreen();
-              }
+              // No navigation needed - the result watcher effect will handle it
             }, 1000);
           }, 100);
           return; // Exit early
@@ -295,21 +250,15 @@ export default function ProcessScreen() {
         // Call the Gemini Vision API to analyze the receipt
         let geminiResult;
         try {
-          console.log('🔥 DIRECTLY CALLING Gemini API with receipt image...');
+          console.log('Calling Gemini API with receipt image');
           
-          // Force logs to flush before making the API call
-          await new Promise(resolve => setTimeout(resolve, 100));
-          
-          // CRITICAL: Direct API call with detailed logging
+          // CRITICAL: Direct API call
           geminiResult = await analyzeReceipt(receiptImage);
-          console.log('✅ Gemini API call successful, result:', geminiResult);
-          
-          // Don't guard against unmounting - allow the process to complete
-          // even if the component is unmounted
+          console.log('Gemini API call successful');
           
           // Validate the Gemini result structure
           if (!validateResultStructure(geminiResult)) {
-            console.error('Invalid Gemini result structure:', geminiResult);
+            console.error('Invalid Gemini result structure');
             throw new Error('Invalid Gemini result structure');
           }
           
@@ -320,9 +269,6 @@ export default function ProcessScreen() {
             console.error('No menu items found in the receipt image');
             throw new Error('No menu items found in the receipt image');
           }
-          
-          // Log successful validation
-          console.log('✅ Gemini result successfully validated');
         } catch (apiError) {
           console.error('Error during Gemini API call:', apiError);
           
@@ -336,15 +282,8 @@ export default function ProcessScreen() {
             if (!isMounted.current) return;
             
             recalculateSplitAmounts();
-            console.log('API error fallback: Mock data set, recalculated, now navigating to items');
             
-            // Navigate to items with mock data
-            setTimeout(() => {
-              if (isMounted.current) {
-                console.log('API error fallback: Navigating to items screen...');
-                navigateToItemsScreen();
-              }
-            }, 300); // Increased delay for stability
+            // No navigation needed - the result watcher effect will handle it
           }, 100);
           
           return; // Exit the function early

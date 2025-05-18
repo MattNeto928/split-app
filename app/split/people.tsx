@@ -11,7 +11,8 @@ import {
   View,
   Dimensions,
   Text,
-  Animated
+  Animated,
+  Modal
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { IconSymbol } from '@/components/ui/IconSymbol';
@@ -32,6 +33,9 @@ export default function PeopleScreen() {
   const [newName, setNewName] = useState('');
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const [reminderVisible, setReminderVisible] = useState(false);
+  const modalFadeAnim = useRef(new Animated.Value(0)).current;
+  const modalScaleAnim = useRef(new Animated.Value(0.9)).current;
   
   const textColor = useThemeColor({}, 'text');
   const backgroundColor = useThemeColor({}, 'background');
@@ -119,11 +123,50 @@ export default function PeopleScreen() {
     }).start();
   };
 
-  const handleNext = () => {
-    if (people.length < 1) {
-      Alert.alert('Error', 'Please add at least one person');
-      return;
-    }
+  const showReminderModal = () => {
+    setReminderVisible(true);
+    Animated.parallel([
+      Animated.timing(modalFadeAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(modalScaleAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      })
+    ]).start();
+  };
+
+  const hideReminderModal = () => {
+    Animated.parallel([
+      Animated.timing(modalFadeAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(modalScaleAnim, {
+        toValue: 0.9,
+        duration: 200,
+        useNativeDriver: true,
+      })
+    ]).start(() => {
+      setReminderVisible(false);
+    });
+  };
+
+  const handleAddPersonAndContinue = () => {
+    handleAddPerson();
+    hideReminderModal();
+    // We don't immediately navigate since handleAddPerson will add the person
+    // and we want to see the animation
+    setTimeout(() => {
+      navigateNext();
+    }, 400);
+  };
+  
+  const navigateNext = () => {
     // Dismiss keyboard before navigation
     Keyboard.dismiss();
     
@@ -144,6 +187,21 @@ export default function PeopleScreen() {
         router.push('/split/camera');
       }
     });
+  };
+
+  const handleNext = () => {
+    if (people.length < 1) {
+      Alert.alert('Error', 'Please add at least one person');
+      return;
+    }
+
+    // Check if there's text in the input field that hasn't been added yet
+    if (newName.trim()) {
+      showReminderModal();
+      return;
+    }
+    
+    navigateNext();
   };
 
   const handleBack = () => {
@@ -171,13 +229,13 @@ export default function PeopleScreen() {
   
   // Background gradient colors
   const backgroundGradient = isDark
-    ? ['#121212', '#1a1a1a']
-    : ['#ffffff', '#f8f9fa'];
+    ? ['#121212', '#1a1a1a'] as const
+    : ['#ffffff', '#f8f9fa'] as const;
     
   // Button gradient
   const buttonGradient = isDark 
-    ? ['#3498db', '#2c7db1'] 
-    : ['#3498db', '#2980b9'];
+    ? ['#3498db', '#2c7db1'] as const
+    : ['#3498db', '#2980b9'] as const;
 
   return (
     <View style={styles.outerContainer}>
@@ -185,6 +243,70 @@ export default function PeopleScreen() {
         colors={backgroundGradient}
         style={styles.background}
       />
+      
+      {/* Custom Reminder Modal */}
+      <Modal
+        transparent={true}
+        visible={reminderVisible}
+        onRequestClose={hideReminderModal}
+        animationType="none"
+      >
+        <View style={styles.modalOverlay}>
+          <Animated.View 
+            style={[
+              styles.modalContainer,
+              { 
+                opacity: modalFadeAnim,
+                transform: [{ scale: modalScaleAnim }],
+                backgroundColor: isDark ? '#1a1a1a' : '#ffffff'
+              }
+            ]}
+          >
+            <View style={styles.modalHeader}>
+              <Ionicons 
+                name="alert-circle-outline" 
+                size={32} 
+                color="#3498db" 
+                style={styles.modalIcon} 
+              />
+              <ThemedText style={styles.modalTitle}>Reminder</ThemedText>
+            </View>
+            
+            <ThemedText style={styles.modalMessage}>
+              Do you want to add "{newName.trim()}" to the list?
+            </ThemedText>
+            
+            <View style={styles.modalActions}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.modalButtonSecondary]}
+                onPress={() => {
+                  hideReminderModal();
+                  navigateNext();
+                }}
+              >
+                <ThemedText style={styles.modalButtonTextSecondary}>
+                  Skip & Continue
+                </ThemedText>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.modalButton}
+                onPress={handleAddPersonAndContinue}
+              >
+                <LinearGradient
+                  colors={buttonGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.modalButtonGradient}
+                >
+                  <Text style={styles.modalButtonText}>Add Person</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
+      
       <KeyboardAvoidingView 
         style={styles.keyboardAvoid} 
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -451,5 +573,83 @@ const styles = StyleSheet.create({
   },
   nextButtonIcon: {
     marginLeft: 8,
-  }
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContainer: {
+    width: '85%',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 15,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    width: '100%',
+  },
+  modalIcon: {
+    marginRight: 10,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontFamily: 'InterSemiBold',
+  },
+  modalMessage: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 24,
+    fontFamily: 'InterRegular',
+    lineHeight: 22,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  modalButton: {
+    width: '48%',
+    borderRadius: 12,
+    overflow: 'hidden',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  modalButtonSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#3498db',
+  },
+  modalButtonGradient: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontFamily: 'InterSemiBold',
+    fontSize: 15,
+  },
+  modalButtonTextSecondary: {
+    color: '#3498db',
+    fontFamily: 'InterSemiBold',
+    fontSize: 15,
+    textAlign: 'center',
+    paddingVertical: 14,
+  },
 });

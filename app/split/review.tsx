@@ -26,7 +26,14 @@ import { Colors } from '@/constants/Colors';
 export default function ReviewScreen() {
   // 1. HOOKS FIRST: Hook calls first to avoid conditional hook execution
   const router = useRouter();
-  const { receiptImage, setReceiptImage, people, setSplitResult, recalculateSplitAmounts } = useSplitContext();
+  const { 
+    receiptImage, 
+    setReceiptImage, 
+    people, 
+    setSplitResult, 
+    recalculateSplitAmounts, 
+    isResetting
+  } = useSplitContext();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const textColor = useThemeColor({}, 'text');
@@ -151,12 +158,19 @@ export default function ReviewScreen() {
 
   // If there's no receipt image, navigate to camera
   useEffect(() => {
+    // Check the resetting flag FIRST
+    if (isResetting) {
+      console.log('ReviewScreen: Reset in progress, skipping image check/navigation.');
+      return; 
+    }
+    
+    // Now check for image only if not resetting
     if (!receiptImage && isMounted.current) {
-      console.log('No receipt image detected, navigating to camera screen');
+      console.log('No receipt image detected (and not resetting), navigating to camera screen');
       // Don't set a timeout as that can cause the buggy "flash" of this screen
       router.replace('/split/camera');
     }
-  }, [receiptImage, router]);
+  }, [receiptImage, router, isResetting]);
   
   // Define all function declarations BEFORE any conditional returns
   const handleRetake = () => {
