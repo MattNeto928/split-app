@@ -97,19 +97,17 @@ export default function RootLayout() {
                 animationDuration: 0, // No animation duration
                 animationTypeForReplace: 'pop',
                 presentation: 'card', // Use simple card presentation
-                detachPreviousScreen: true,
-                detachInactiveScreens: false, // Keep inactive screens mounted
               }}
             >
               <Stack.Screen name="(tabs)" options={{ gestureEnabled: false }} />
               <Stack.Screen name="+not-found" />
-              <Stack.Screen name="split/people" options={{ unmountOnBlur: true }} />
-              <Stack.Screen name="split/camera" options={{ unmountOnBlur: true }} />
-              <Stack.Screen name="split/review" options={{ unmountOnBlur: true }} />
-              <Stack.Screen name="split/process" options={{ unmountOnBlur: true }} />
-              <Stack.Screen name="split/items" options={{ unmountOnBlur: true }} />
-              <Stack.Screen name="split/tip" options={{ unmountOnBlur: true }} />
-              <Stack.Screen name="split/results" options={{ unmountOnBlur: true }} />
+              <Stack.Screen name="split/people" />
+              <Stack.Screen name="split/camera" />
+              <Stack.Screen name="split/review" />
+              <Stack.Screen name="split/process" />
+              <Stack.Screen name="split/items" />
+              <Stack.Screen name="split/tip" />
+              <Stack.Screen name="split/results" />
             </Stack>
             <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
             <UpdateHandler />
