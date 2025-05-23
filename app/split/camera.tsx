@@ -435,7 +435,7 @@ export default function CameraScreen() {
         facing={facing}
         ref={cameraRef}
         enableTorch={isTorchOn} // Use the enableTorch prop
-      /> {/* Close CameraView here */}
+      />
       <Animated.View // This is the overlay content
           style={[
             styles.overlay,
