@@ -65,7 +65,7 @@ export async function analyzeReceipt(imageBase64: string) {
     
     // Use a stable Gemini Vision model - this model has better support for vision tasks
     // Using gemini-1.5-flash, which is more reliable than 2.0 for images
-    const model = getGenAI().getGenerativeModel({ model: 'gemini-2.5-flash-preview-04-17' });
+    const model = getGenAI().getGenerativeModel({ model: 'gemini-2.5-flash-lite-preview-06-17' });
     
     // Prepare the prompt with instructions and context
     const prompt = `Analyze this restaurant receipt image and return a JSON object with the following structure:
