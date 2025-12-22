@@ -293,8 +293,12 @@ export default function HistoryScreen() {
     });
     
     const restaurantName = item.result.restaurantName || 'Receipt';
-    const total = item.result.total || 
-      item.result.menuItems?.reduce((sum, item) => sum + (item.price || 0), 0) || 0;
+    
+    // Calculate grand total (subtotal + tax + tip)
+    const baseTotal = parseFloat((item.result.total || '0').toString().replace(/[^0-9.]/g, '')) || 
+      item.result.menuItems?.reduce((sum, menuItem) => sum + (menuItem.price || 0), 0) || 0;
+    const tip = parseFloat((item.result.tip || '0').toString().replace(/[^0-9.]/g, '')) || 0;
+    const total = baseTotal + tip;
     
     return (
       <Animated.View

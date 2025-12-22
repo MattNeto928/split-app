@@ -1,11 +1,80 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
-import { StyleSheet, Easing, BackHandler, TouchableOpacity, Animated } from 'react-native';
+import { StyleSheet, Easing, BackHandler, TouchableOpacity, Animated, Modal, View, Dimensions } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { useSplitContext } from '@/contexts/SplitContext';
 import { analyzeReceipt, setApiKey } from '@/services/geminiService';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useColorScheme } from '@/hooks/useColorScheme';
+
+// Error types for better user feedback
+type ErrorType = 'timeout' | 'network' | 'parsing' | 'invalid_image' | 'api_error' | 'unknown';
+
+interface ErrorInfo {
+  type: ErrorType;
+  title: string;
+  message: string;
+  suggestion: string;
+}
+
+// Function to categorize errors and provide helpful messages
+const getErrorInfo = (error: Error | string): ErrorInfo => {
+  const errorMessage = typeof error === 'string' ? error : error.message;
+  
+  if (errorMessage.includes('TIMEOUT') || errorMessage.includes('timed out')) {
+    return {
+      type: 'timeout',
+      title: 'Request Timed Out',
+      message: 'The analysis is taking longer than expected. This usually happens with slow internet connections or complex receipts.',
+      suggestion: 'Try again with a clearer photo or check your internet connection.'
+    };
+  }
+  
+  if (errorMessage.includes('network') || errorMessage.includes('fetch') || errorMessage.includes('Network')) {
+    return {
+      type: 'network',
+      title: 'Network Error',
+      message: 'Unable to connect to our servers. Please check your internet connection.',
+      suggestion: 'Make sure you have a stable internet connection and try again.'
+    };
+  }
+  
+  if (errorMessage.includes('Invalid receipt image') || errorMessage.includes('Invalid image')) {
+    return {
+      type: 'invalid_image',
+      title: 'Invalid Image',
+      message: 'The image could not be processed. It may be too dark, blurry, or not a valid receipt.',
+      suggestion: 'Take a new photo with better lighting and make sure the receipt is clearly visible.'
+    };
+  }
+  
+  if (errorMessage.includes('parse') || errorMessage.includes('JSON') || errorMessage.includes('structure')) {
+    return {
+      type: 'parsing',
+      title: 'Parsing Error',
+      message: 'We had trouble reading the receipt. The format might be unusual or the text unclear.',
+      suggestion: 'Try taking a clearer photo with the receipt flat and well-lit.'
+    };
+  }
+  
+  if (errorMessage.includes('API') || errorMessage.includes('401') || errorMessage.includes('403') || errorMessage.includes('500')) {
+    return {
+      type: 'api_error',
+      title: 'Service Error',
+      message: 'There was an issue with our AI service. This is usually temporary.',
+      suggestion: 'Please wait a moment and try again. If the problem persists, try again later.'
+    };
+  }
+  
+  return {
+    type: 'unknown',
+    title: 'Something Went Wrong',
+    message: 'An unexpected error occurred while analyzing your receipt.',
+    suggestion: 'Please try again. If the problem continues, try taking a new photo.'
+  };
+};
 
 // Helper function to validate the result structure
 const validateResultStructure = (result) => {
@@ -57,6 +126,12 @@ export default function ProcessScreen() {
   const { receiptImage, people, setSplitResult, recalculateSplitAmounts, result } = useSplitContext();
   const rotateAnimation = useRef(new Animated.Value(0)).current;
   const scaleAnimation = useRef(new Animated.Value(0.95)).current;
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+
+  // Error modal state
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorInfo, setErrorInfo] = useState<ErrorInfo | null>(null);
 
   console.log(`🚨 PROCESS SCREEN MOUNTED:
   - Trigger: ${triggerSource}
@@ -272,19 +347,13 @@ export default function ProcessScreen() {
         } catch (apiError) {
           console.error('Error during Gemini API call:', apiError);
           
-          // If there's an API error, use mock data instead
-          console.log('API call failed, using mock data instead');
-          const mockResult = generateMockResult();
-          setSplitResult(mockResult);
-          
-          // Wait for state update to complete before recalculating
-          setTimeout(() => {
-            if (!isMounted.current) return;
-            
-            recalculateSplitAmounts();
-            
-            // No navigation needed - the result watcher effect will handle it
-          }, 100);
+          // Show error modal with detailed information
+          if (isMounted.current) {
+            const error = apiError as Error;
+            const info = getErrorInfo(error);
+            setErrorInfo(info);
+            setShowErrorModal(true);
+          }
           
           return; // Exit the function early
         }
@@ -327,29 +396,11 @@ export default function ProcessScreen() {
         
         console.error('Error processing receipt:', err);
         
-        // If Gemini fails, fall back to mock data for demo purposes
-        console.log('Falling back to mock data');
-        
-        // Generate mock data
-        const mockResult = generateMockResult();
-        setSplitResult(mockResult);
-        
-        // Wait for state update to complete before recalculating
-        setTimeout(() => {
-          if (!isMounted.current) return;
-          
-          // Recalculate split amounts based on items
-          recalculateSplitAmounts();
-          console.log('Error fallback: Mock data set, recalculated, now navigating to items');
-          
-          // Navigate to the items screen with mock data after a short delay
-          setTimeout(() => {
-            if (isMounted.current) {
-              console.log('Error recovery: Attempting navigation to items screen...');
-              navigateToItemsScreen();
-            }
-          }, 300); // Increased delay for stability
-        }, 100);
+        // Show error modal with detailed information
+        const error = err as Error;
+        const info = getErrorInfo(error);
+        setErrorInfo(info);
+        setShowErrorModal(true);
       }
     };
 
@@ -645,6 +696,86 @@ export default function ProcessScreen() {
           </ThemedText>
         </TouchableOpacity>
       )}
+
+      {/* Error Modal */}
+      <Modal
+        visible={showErrorModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setShowErrorModal(false);
+          router.push('/split/review');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[
+            styles.modalContent,
+            { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }
+          ]}>
+            {/* Error Icon */}
+            <View style={[
+              styles.errorIconContainer,
+              { backgroundColor: errorInfo?.type === 'timeout' ? '#F59E0B' : '#EF4444' }
+            ]}>
+              <IconSymbol 
+                name={errorInfo?.type === 'timeout' ? 'clock' : 'exclamationmark.triangle'} 
+                size={32} 
+                color="#FFFFFF" 
+              />
+            </View>
+
+            {/* Error Title */}
+            <ThemedText style={styles.errorTitle}>
+              {errorInfo?.title || 'Error'}
+            </ThemedText>
+
+            {/* Error Message */}
+            <ThemedText style={[styles.errorMessage, { color: isDark ? '#D1D5DB' : '#4B5563' }]}>
+              {errorInfo?.message || 'An unexpected error occurred.'}
+            </ThemedText>
+
+            {/* Suggestion */}
+            <View style={[styles.suggestionContainer, { backgroundColor: isDark ? '#374151' : '#F3F4F6' }]}>
+              <IconSymbol name="lightbulb" size={18} color={isDark ? '#FBBF24' : '#F59E0B'} />
+              <ThemedText style={[styles.suggestionText, { color: isDark ? '#E5E7EB' : '#374151' }]}>
+                {errorInfo?.suggestion || 'Please try again.'}
+              </ThemedText>
+            </View>
+
+            {/* Action Buttons */}
+            <View style={styles.modalButtonContainer}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonSecondary, { borderColor: isDark ? '#4B5563' : '#D1D5DB' }]}
+                onPress={() => {
+                  setShowErrorModal(false);
+                  router.push('/split/review');
+                }}
+              >
+                <ThemedText style={[styles.modalButtonTextSecondary, { color: isDark ? '#E5E7EB' : '#374151' }]}>
+                  Go Back
+                </ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonPrimary]}
+                onPress={() => {
+                  setShowErrorModal(false);
+                  setErrorInfo(null);
+                  // Reset and retry - this will trigger the useEffect again
+                  processingRef.current = false;
+                  // Force re-process by navigating away and back
+                  router.replace(('/split/process?retry=true&timestamp=' + Date.now()) as any);
+                }}
+              >
+                <IconSymbol name="arrow.clockwise" size={16} color="#FFFFFF" />
+                <ThemedText style={styles.modalButtonTextPrimary}>
+                  Try Again
+                </ThemedText>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ThemedView>
   );
 }
@@ -824,5 +955,101 @@ const styles = StyleSheet.create({
     fontSize: 16,
     letterSpacing: 0.3,
     textAlign: 'center',
+  },
+  // Error Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  errorIconContainer: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  errorTitle: {
+    fontSize: 24,
+    fontFamily: 'OutfitBold',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  errorMessage: {
+    fontSize: 16,
+    fontFamily: 'OutfitRegular',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 20,
+  },
+  suggestionContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 24,
+    width: '100%',
+  },
+  suggestionText: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: 'OutfitMedium',
+    marginLeft: 10,
+    lineHeight: 20,
+  },
+  modalButtonContainer: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+  },
+  modalButtonSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+  },
+  modalButtonPrimary: {
+    backgroundColor: '#3498db',
+    shadowColor: '#3498db',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  modalButtonTextSecondary: {
+    fontSize: 16,
+    fontFamily: 'OutfitSemiBold',
+  },
+  modalButtonTextPrimary: {
+    fontSize: 16,
+    fontFamily: 'OutfitSemiBold',
+    color: '#FFFFFF',
   },
 });

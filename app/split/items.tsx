@@ -67,6 +67,10 @@ export default function ItemsScreen() {
   const [editedPrice, setEditedPrice] = useState('');
   const [editModalAnimation] = useState(new Animated.Value(0));
 
+  // Unassigned items confirmation modal state
+  const [showUnassignedModal, setShowUnassignedModal] = useState(false);
+  const [unassignedCount, setUnassignedCount] = useState(0);
+
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideInHeader = useRef(new Animated.Value(-20)).current;
@@ -176,20 +180,31 @@ export default function ItemsScreen() {
     return validItems.every(item => item.assignedTo.length > 0);
   }, [result]);
 
+  // Get count of unassigned items
+  const getUnassignedItemsCount = useCallback(() => {
+    if (!result?.menuItems) return 0;
+    const validItems = result.menuItems.filter(item => item.price > 0);
+    return validItems.filter(item => item.assignedTo.length === 0).length;
+  }, [result]);
+
   // Function to navigate forward once all items are assigned
   const handleContinue = useCallback(() => {
     // Check if all items have been assigned
     if (validateAssignments()) {
       router.push('/split/tip');
     } else {
-      // Highlight the unassigned items
-      Alert.alert(
-        "Unassigned Items",
-        "Please assign all items to at least one person before continuing.",
-        [{ text: "OK", style: "default" }]
-      );
+      // Count unassigned items and show confirmation modal
+      const count = getUnassignedItemsCount();
+      setUnassignedCount(count);
+      setShowUnassignedModal(true);
     }
-  }, [validateAssignments, router]);
+  }, [validateAssignments, router, getUnassignedItemsCount]);
+
+  // Handle confirming to continue with unassigned items
+  const handleConfirmContinue = useCallback(() => {
+    setShowUnassignedModal(false);
+    router.push('/split/tip');
+  }, [router]);
 
   // Function to toggle expanded state of an item - optimize this to prevent repeated calls
   const toggleItemExpansion = useCallback((itemId: string) => {
@@ -755,6 +770,65 @@ export default function ItemsScreen() {
             </Animated.View>
           </KeyboardAvoidingView>
         </Modal>
+
+        {/* Unassigned Items Confirmation Modal */}
+        <Modal
+          visible={showUnassignedModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowUnassignedModal(false)}
+        >
+          <View style={styles.unassignedModalOverlay}>
+            <View style={[
+              styles.unassignedModalContent,
+              { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }
+            ]}>
+              {/* Warning Icon */}
+              <View style={styles.unassignedIconContainer}>
+                <Ionicons name="alert-circle" size={40} color="#F59E0B" />
+              </View>
+
+              {/* Title */}
+              <ThemedText style={styles.unassignedModalTitle}>
+                Unassigned Items
+              </ThemedText>
+
+              {/* Message */}
+              <ThemedText style={[styles.unassignedModalMessage, { color: isDark ? '#D1D5DB' : '#4B5563' }]}>
+                There {unassignedCount === 1 ? 'is' : 'are'} <Text style={styles.unassignedCountText}>{unassignedCount}</Text> unassigned {unassignedCount === 1 ? 'item' : 'items'}. Are you sure you want to continue?
+              </ThemedText>
+
+              {/* Info Box */}
+              <View style={[styles.unassignedInfoBox, { backgroundColor: isDark ? '#374151' : '#F3F4F6' }]}>
+                <Ionicons name="information-circle" size={20} color={isDark ? '#60A5FA' : '#3B82F6'} />
+                <ThemedText style={[styles.unassignedInfoText, { color: isDark ? '#E5E7EB' : '#374151' }]}>
+                  All unassigned items will be split evenly among everyone.
+                </ThemedText>
+              </View>
+
+              {/* Buttons */}
+              <View style={styles.unassignedModalButtons}>
+                <TouchableOpacity
+                  style={[styles.unassignedModalButton, styles.unassignedCancelButton, { borderColor: isDark ? '#4B5563' : '#D1D5DB' }]}
+                  onPress={() => setShowUnassignedModal(false)}
+                >
+                  <ThemedText style={[styles.unassignedCancelButtonText, { color: isDark ? '#E5E7EB' : '#374151' }]}>
+                    Go Back
+                  </ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.unassignedModalButton, styles.unassignedConfirmButton]}
+                  onPress={handleConfirmContinue}
+                >
+                  <Text style={styles.unassignedConfirmButtonText}>
+                    Continue Anyway
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     </View>
   );
@@ -1078,5 +1152,91 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // Unassigned Items Confirmation Modal Styles
+  unassignedModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  unassignedModalContent: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  unassignedIconContainer: {
+    marginBottom: 16,
+  },
+  unassignedModalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  unassignedModalMessage: {
+    fontSize: 16,
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 16,
+  },
+  unassignedCountText: {
+    fontWeight: 'bold',
+    color: '#F59E0B',
+  },
+  unassignedInfoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 24,
+    width: '100%',
+  },
+  unassignedInfoText: {
+    flex: 1,
+    fontSize: 14,
+    marginLeft: 10,
+    lineHeight: 20,
+  },
+  unassignedModalButtons: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 12,
+  },
+  unassignedModalButton: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  unassignedCancelButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+  },
+  unassignedCancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  unassignedConfirmButton: {
+    backgroundColor: '#3498db',
+    shadowColor: '#3498db',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  unassignedConfirmButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

@@ -17,7 +17,9 @@ import {
   TextInput,
   KeyboardAvoidingView,
   TouchableWithoutFeedback,
-  Keyboard
+  Keyboard,
+  LayoutAnimation,
+  UIManager
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -32,6 +34,11 @@ import { useSplitContext } from '@/contexts/SplitContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { saveReceiptToHistory } from '@/services/storageService';
+
+// Enable LayoutAnimation for Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 // Function to generate consistent colors based on index
 const getPersonColor = (index: number) => {
@@ -79,6 +86,9 @@ export default function ResultsScreen() {
   const [tipPercent, setTipPercent] = useState('');
   const [activeTipOption, setActiveTipOption] = useState<'amount' | 'percent'>('percent');
   const [tipModalAnimation] = useState(new Animated.Value(0));
+  
+  // Expanded person breakdown state
+  const [expandedPersonId, setExpandedPersonId] = useState<string | null>(null);
 
   // Background gradient colors
   const backgroundGradient = isDark
@@ -200,28 +210,8 @@ export default function ResultsScreen() {
       const shouldNavigateAway = handleNavigation();
       if (shouldNavigateAway) return;
 
-      // Then check if all items are assigned - skip this check if coming from history
-      if (!fromHistory && result?.menuItems && result.menuItems.length > 0) {
-        const unassignedItems = result.menuItems.filter(item =>
-          item.price > 0 && item.assignedTo.length === 0
-        );
-
-        if (unassignedItems.length > 0 && isMounted.current) {
-          console.log('Found unassigned items, going back to items screen');
-          Alert.alert(
-            "Unassigned Items",
-            "Some items haven\'t been assigned. Please assign all items.",
-            [{ text: "OK", style: "default" }]
-          );
-          setTimeout(() => {
-            if (isMounted.current) {
-              // Simplify navigation - always go back to items screen if unassigned
-              router.replace('/split/items'); 
-            }
-          }, 300);
-          return;
-        }
-      }
+      // NOTE: Unassigned items check removed - users now confirm on items screen
+      // that they want to continue with unassigned items (will be split evenly)
 
       // Check if split amounts exist. 
       // If missing AND NOT from history, navigate back to tip screen.
@@ -287,6 +277,10 @@ export default function ResultsScreen() {
     const tip = parseFloat(result.tip.replace(/[^0-9.]/g, '')) || 0;
     const subtotal = total - tax;
     const grandTotal = subtotal + tax + tip;
+    
+    // Calculate tax and tip rates
+    const taxRate = subtotal > 0 ? tax / subtotal : 0;
+    const tipRate = subtotal > 0 ? tip / subtotal : 0;
 
     // Log the values for debugging
     console.log('Sharing results:');
@@ -295,17 +289,52 @@ export default function ResultsScreen() {
     console.log(`Tip: $${tip.toFixed(2)}`);
     console.log(`Total with tip: $${grandTotal.toFixed(2)}`);
 
-    const totalMessage = `Total bill: $${grandTotal.toFixed(2)}\nSubtotal: $${subtotal.toFixed(2)}\nTax: $${tax.toFixed(2)}\nTip: $${tip.toFixed(2)}`;
+    // Restaurant name if available
+    const restaurantLine = result.restaurantName ? `📍 ${result.restaurantName}\n\n` : '';
 
-    // The split amounts from the context already include tip and tax
-    // We don't need to modify them further
-    const individualAmounts = result.splitAmounts
+    const totalMessage = `💰 Bill Summary\nSubtotal: $${subtotal.toFixed(2)}\nTax: $${tax.toFixed(2)}\nTip: $${tip.toFixed(2)}\nTotal: $${grandTotal.toFixed(2)}`;
+
+    // Build detailed breakdown for each person
+    const detailedBreakdowns = result.splitAmounts
       .map(split => {
         const person = people.find(p => p.id === split.personId);
-        return person ? `${person.name}: $${split.amount}` : '';
+        if (!person) return '';
+        
+        // Get this person's items
+        const personItems = result.menuItems
+          ?.filter(item => item.assignedTo.includes(split.personId) && item.price > 0)
+          .map(item => {
+            const splitCount = item.assignedTo.length;
+            const itemShare = item.price / splitCount;
+            if (splitCount > 1) {
+              return `  • ${item.name}: $${itemShare.toFixed(2)} (split ${splitCount} ways)`;
+            }
+            return `  • ${item.name}: $${itemShare.toFixed(2)}`;
+          }) || [];
+        
+        // Calculate their subtotal, tax, and tip
+        const personSubtotal = personItems.length > 0 
+          ? result.menuItems
+              ?.filter(item => item.assignedTo.includes(split.personId) && item.price > 0)
+              .reduce((sum, item) => sum + (item.price / item.assignedTo.length), 0) || 0
+          : 0;
+        const personTax = personSubtotal * taxRate;
+        const personTip = personSubtotal * tipRate;
+        
+        // Build the person's section
+        let personSection = `👤 ${person.name} - $${split.amount}`;
+        
+        if (personItems.length > 0) {
+          personSection += '\n' + personItems.join('\n');
+          personSection += `\n  ├ Subtotal: $${personSubtotal.toFixed(2)}`;
+          personSection += `\n  ├ Tax: $${personTax.toFixed(2)}`;
+          personSection += `\n  └ Tip: $${personTip.toFixed(2)}`;
+        }
+        
+        return personSection;
       })
       .filter(Boolean)
-      .join('\n');
+      .join('\n\n');
 
     // Calculate sum of all shares to verify
     let sumOfAllShares = 0;
@@ -316,11 +345,11 @@ export default function ResultsScreen() {
     console.log(`Sum of all shares: $${sumOfAllShares.toFixed(2)}`);
     console.log(`Match expected total? ${Math.abs(grandTotal - sumOfAllShares) < 0.02 ? 'Yes' : 'No'}`);
 
-    const message = `Split Results\n\n${totalMessage}\n\n${individualAmounts}\n\nPowered by Split App`;
+    const message = `🧾 Split Results\n\n${restaurantLine}${totalMessage}\n\n${'─'.repeat(20)}\n\n${detailedBreakdowns}\n\n${'─'.repeat(20)}\nSplit with Split App 📱`;
 
     Share.share({
       message,
-      title: 'Split',
+      title: 'Split Results',
     });
   }, [result, people]);
 
@@ -549,6 +578,68 @@ export default function ResultsScreen() {
         amount: split.amount
       };
     }) : [];
+
+  // Calculate detailed breakdown for a person
+  const getPersonBreakdown = useCallback((personId: string) => {
+    if (!result?.menuItems) return null;
+
+    // Get tax and tip rates
+    const total = parseFloat(result.total.replace(/[^0-9.]/g, '')) || 0;
+    const tax = parseFloat(result.tax.replace(/[^0-9.]/g, '')) || 0;
+    const tip = parseFloat(result.tip.replace(/[^0-9.]/g, '')) || 0;
+    const subtotal = total - tax;
+    const taxRate = subtotal > 0 ? tax / subtotal : 0;
+    const tipRate = subtotal > 0 ? tip / subtotal : 0;
+
+    // Find all items assigned to this person
+    const personItems = result.menuItems
+      .filter(item => item.assignedTo.includes(personId) && item.price > 0)
+      .map(item => {
+        const splitCount = item.assignedTo.length;
+        const itemShare = item.price / splitCount;
+        const itemTax = itemShare * taxRate;
+        const itemTip = itemShare * tipRate;
+        return {
+          id: item.id,
+          name: item.name,
+          fullPrice: item.price,
+          splitCount: splitCount,
+          yourShare: itemShare,
+          taxContribution: itemTax,
+          tipContribution: itemTip,
+          totalForItem: itemShare + itemTax + itemTip
+        };
+      });
+
+    // Calculate totals
+    const subtotalShare = personItems.reduce((sum, item) => sum + item.yourShare, 0);
+    const taxShare = personItems.reduce((sum, item) => sum + item.taxContribution, 0);
+    const tipShare = personItems.reduce((sum, item) => sum + item.tipContribution, 0);
+    const grandTotal = subtotalShare + taxShare + tipShare;
+
+    return {
+      items: personItems,
+      subtotalShare,
+      taxShare,
+      tipShare,
+      grandTotal,
+      taxRate: taxRate * 100,
+      tipRate: tipRate * 100
+    };
+  }, [result]);
+
+  // Toggle person expansion with LayoutAnimation for smooth native performance
+  const togglePersonExpand = useCallback((personId: string) => {
+    // Use easeInEaseOut for snappy, responsive animation
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
+    // Simple toggle - LayoutAnimation handles the smooth transition
+    if (expandedPersonId === personId) {
+      setExpandedPersonId(null);
+    } else {
+      setExpandedPersonId(personId);
+    }
+  }, [expandedPersonId]);
 
   return (
     <ThemedView style={styles.container}>
@@ -1074,7 +1165,7 @@ export default function ResultsScreen() {
           </Animated.View>
 
           {/* You Pay Card */}
-          {meAmount && (
+          {meAmount && mePersonId && (
             <Animated.View style={{
               transform: [
                 { scale: scaleYouPay },
@@ -1083,21 +1174,95 @@ export default function ResultsScreen() {
               opacity: fadeIn,
               marginVertical: 16
             }}>
-              <View style={styles.youPayContainer}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => togglePersonExpand('me')}
+                style={styles.youPayContainer}
+              >
                 <LinearGradient
                   colors={buttonGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.youPayGradient}
                 >
-                  <View style={styles.youPayCard}>
-                    <Text style={styles.youPayTitle}>You Pay</Text>
+                  <View style={[
+                    styles.youPayCard,
+                    expandedPersonId === 'me' && styles.youPayCardExpanded
+                  ]}>
+                    <View style={styles.youPayHeader}>
+                      <Text style={styles.youPayTitle}>You Pay</Text>
+                      <View style={{
+                        transform: [{ rotate: expandedPersonId === 'me' ? '180deg' : '0deg' }]
+                      }}>
+                        <Ionicons name="chevron-down" size={20} color="rgba(255,255,255,0.7)" />
+                      </View>
+                    </View>
                     <Text style={styles.youPayAmount}>${meAmount}</Text>
                     <View style={styles.youPayDivider} />
-                    <Text style={styles.youPayDesc}>Your portion of the bill</Text>
+                    <Text style={styles.youPayDesc}>
+                      {expandedPersonId === 'me' ? 'Tap to collapse' : 'Tap for breakdown'}
+                    </Text>
+                    
+                    {/* Expandable Breakdown for Me - LayoutAnimation handles the transition */}
+                    {expandedPersonId === 'me' && (() => {
+                      const breakdown = getPersonBreakdown('me');
+                      if (!breakdown) return null;
+                      
+                      return (
+                        <View style={styles.meBreakdownContainer}>
+                          {/* Items List */}
+                          <View style={styles.meBreakdownSection}>
+                            <Text style={styles.meBreakdownSectionTitle}>Your Items</Text>
+                            {breakdown.items.map((item) => (
+                              <View key={item.id} style={styles.meBreakdownItem}>
+                                <View style={styles.breakdownItemHeader}>
+                                  <Text style={styles.meBreakdownItemName} numberOfLines={1}>
+                                    {item.name}
+                                  </Text>
+                                  <Text style={styles.meBreakdownItemTotal}>
+                                    ${item.yourShare.toFixed(2)}
+                                  </Text>
+                                </View>
+                                {item.splitCount > 1 && (
+                                  <Text style={styles.meBreakdownItemNote}>
+                                    ${item.fullPrice.toFixed(2)} ÷ {item.splitCount} people
+                                  </Text>
+                                )}
+                              </View>
+                            ))}
+                            
+                            {breakdown.items.length === 0 && (
+                              <Text style={styles.meBreakdownEmptyNote}>
+                                No items assigned to you
+                              </Text>
+                            )}
+                          </View>
+
+                          {/* Totals */}
+                          <View style={styles.meBreakdownDivider} />
+                          <View style={styles.meBreakdownRow}>
+                            <Text style={styles.meBreakdownLabel}>Subtotal</Text>
+                            <Text style={styles.meBreakdownValue}>${breakdown.subtotalShare.toFixed(2)}</Text>
+                          </View>
+                          <View style={styles.meBreakdownRow}>
+                            <Text style={styles.meBreakdownLabel}>Tax ({breakdown.taxRate.toFixed(1)}%)</Text>
+                            <Text style={styles.meBreakdownValue}>${breakdown.taxShare.toFixed(2)}</Text>
+                          </View>
+                          <View style={styles.meBreakdownRow}>
+                            <Text style={styles.meBreakdownLabel}>Tip ({breakdown.tipRate.toFixed(1)}%)</Text>
+                            <Text style={styles.meBreakdownValue}>${breakdown.tipShare.toFixed(2)}</Text>
+                          </View>
+                          <View style={styles.meBreakdownDivider} />
+                          <View style={styles.meBreakdownTotalRow}>
+                            <Text style={styles.meBreakdownTotalLabel}>Total</Text>
+                            <Text style={styles.meBreakdownTotalValue}>${breakdown.grandTotal.toFixed(2)}</Text>
+                          </View>
+                        </View>
+                      );
+                    })()}
                   </View>
                 </LinearGradient>
-              </View>
+              </TouchableOpacity>
             </Animated.View>
           )}
 
@@ -1129,30 +1294,124 @@ export default function ResultsScreen() {
                     </View>
                   ) : (
                     <View style={styles.peopleList}>
-                      {peopleWhoOwe.map((person, index) => (
-                        <Animated.View key={person.id} style={{
-                          opacity: staggeredItems[index] || fadeIn,
-                          transform: [{
-                            translateX: (staggeredItems[index] || fadeIn).interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [50, 0]
-                            })
-                          }]
-                        }}>
-                          <View style={styles.personRow}>
-                            <View style={styles.personAvatar}>
-                              <Text style={styles.personInitial}>
-                                {person.name.charAt(0).toUpperCase()}
-                              </Text>
-                            </View>
-                            <View style={styles.personDetails}>
-                              <ThemedText style={styles.personName}>{person.name}</ThemedText>
-                              <ThemedText style={styles.personNote}>owes you</ThemedText>
-                            </View>
-                            <Text style={styles.personAmount}>${person.amount}</Text>
-                          </View>
-                        </Animated.View>
-                      ))}
+                      {peopleWhoOwe.map((person, index) => {
+                        const isExpanded = expandedPersonId === person.id;
+                        const breakdown = isExpanded ? getPersonBreakdown(person.id) : null;
+
+                        return (
+                          <Animated.View key={person.id} style={{
+                            opacity: staggeredItems[index] || fadeIn,
+                            transform: [{
+                              translateX: (staggeredItems[index] || fadeIn).interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [50, 0]
+                              })
+                            }]
+                          }}>
+                            <TouchableOpacity
+                              activeOpacity={0.7}
+                              onPress={() => togglePersonExpand(person.id)}
+                              style={[
+                                styles.personRowContainer,
+                                isExpanded && styles.personRowContainerExpanded
+                              ]}
+                            >
+                              <View style={styles.personRow}>
+                                <View style={[styles.personAvatar, { backgroundColor: getPersonColor(index + 1) }]}>
+                                  <Text style={styles.personInitial}>
+                                    {person.name.charAt(0).toUpperCase()}
+                                  </Text>
+                                </View>
+                                <View style={styles.personDetails}>
+                                  <ThemedText style={styles.personName}>{person.name}</ThemedText>
+                                  <ThemedText style={styles.personNote}>
+                                    {isExpanded ? 'tap to collapse' : 'tap for breakdown'}
+                                  </ThemedText>
+                                </View>
+                                <View style={styles.personAmountContainer}>
+                                  <Text style={styles.personAmount}>${person.amount}</Text>
+                                  <View style={{
+                                    transform: [{ rotate: isExpanded ? '180deg' : '0deg' }]
+                                  }}>
+                                    <Ionicons name="chevron-down" size={18} color={isDark ? '#888' : '#666'} />
+                                  </View>
+                                </View>
+                              </View>
+
+                              {/* Expandable Breakdown Section - LayoutAnimation handles the transition */}
+                              {isExpanded && breakdown && (
+                                <View style={styles.breakdownContainer}>
+                                  {/* Items List */}
+                                  <View style={styles.breakdownSection}>
+                                    <ThemedText style={styles.breakdownSectionTitle}>Items</ThemedText>
+                                    {breakdown.items.map((item) => (
+                                      <View key={item.id} style={styles.breakdownItem}>
+                                        <View style={styles.breakdownItemHeader}>
+                                          <ThemedText style={styles.breakdownItemName} numberOfLines={1}>
+                                            {item.name}
+                                          </ThemedText>
+                                          <ThemedText style={styles.breakdownItemTotal}>
+                                            ${item.yourShare.toFixed(2)}
+                                          </ThemedText>
+                                        </View>
+                                        {item.splitCount > 1 && (
+                                          <ThemedText style={styles.breakdownItemNote}>
+                                            ${item.fullPrice.toFixed(2)} ÷ {item.splitCount} people
+                                          </ThemedText>
+                                        )}
+                                      </View>
+                                    ))}
+                                    
+                                    {breakdown.items.length === 0 && (
+                                      <ThemedText style={styles.breakdownEmptyNote}>
+                                        No items assigned
+                                      </ThemedText>
+                                    )}
+                                  </View>
+
+                                  {/* Subtotal */}
+                                  <View style={styles.breakdownDivider} />
+                                  <View style={styles.breakdownRow}>
+                                    <ThemedText style={styles.breakdownLabel}>Subtotal</ThemedText>
+                                    <ThemedText style={styles.breakdownValue}>
+                                      ${breakdown.subtotalShare.toFixed(2)}
+                                    </ThemedText>
+                                  </View>
+
+                                  {/* Tax */}
+                                  <View style={styles.breakdownRow}>
+                                    <ThemedText style={styles.breakdownLabel}>
+                                      Tax ({breakdown.taxRate.toFixed(1)}%)
+                                    </ThemedText>
+                                    <ThemedText style={styles.breakdownValue}>
+                                      ${breakdown.taxShare.toFixed(2)}
+                                    </ThemedText>
+                                  </View>
+
+                                  {/* Tip */}
+                                  <View style={styles.breakdownRow}>
+                                    <ThemedText style={styles.breakdownLabel}>
+                                      Tip ({breakdown.tipRate.toFixed(1)}%)
+                                    </ThemedText>
+                                    <ThemedText style={styles.breakdownValue}>
+                                      ${breakdown.tipShare.toFixed(2)}
+                                    </ThemedText>
+                                  </View>
+
+                                  {/* Grand Total */}
+                                  <View style={styles.breakdownDivider} />
+                                  <View style={styles.breakdownTotalRow}>
+                                    <ThemedText style={styles.breakdownTotalLabel}>Total</ThemedText>
+                                    <ThemedText style={styles.breakdownTotalValue}>
+                                      ${breakdown.grandTotal.toFixed(2)}
+                                    </ThemedText>
+                                  </View>
+                                </View>
+                              )}
+                            </TouchableOpacity>
+                          </Animated.View>
+                        );
+                      })}
 
                       {/* Verification total row */}
                       {(() => {
@@ -1876,6 +2135,9 @@ const styles = StyleSheet.create({
     padding: 20,
     alignItems: 'center',
   },
+  youPayCardExpanded: {
+    alignItems: 'stretch',
+  },
   youPayTitle: {
     fontSize: 18,
     color: '#ffffff',
@@ -1926,8 +2188,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0, 0, 0, 0.05)',
+    paddingHorizontal: 12,
   },
   verificationRow: {
     flexDirection: 'row',
@@ -2348,5 +2609,214 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 4,
     fontFamily: 'InterMedium',
+  },
+  // Person Row Expandable Breakdown Styles
+  personRowContainer: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  personRowContainerExpanded: {
+    backgroundColor: 'rgba(52, 152, 219, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 152, 219, 0.2)',
+    paddingBottom: 4,
+  },
+  personAmountContainer: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  breakdownContainer: {
+    marginHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(52, 152, 219, 0.06)',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  breakdownSection: {
+    marginBottom: 12,
+  },
+  breakdownSectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    opacity: 0.6,
+    marginBottom: 8,
+  },
+  breakdownItem: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.03)',
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  breakdownItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  breakdownItemName: {
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+    marginRight: 12,
+  },
+  breakdownItemTotal: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#3498db',
+  },
+  breakdownItemNote: {
+    fontSize: 12,
+    opacity: 0.6,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  breakdownEmptyNote: {
+    fontSize: 14,
+    opacity: 0.5,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 12,
+  },
+  breakdownDivider: {
+    height: 1,
+    backgroundColor: 'rgba(150, 150, 150, 0.2)',
+    marginVertical: 12,
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  breakdownLabel: {
+    fontSize: 14,
+    opacity: 0.7,
+  },
+  breakdownValue: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  breakdownTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  breakdownTotalLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  breakdownTotalValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#3498db',
+  },
+  // You Pay Header and Breakdown Styles
+  youPayHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+  },
+  meBreakdownContainer: {
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.2)',
+    width: '100%',
+    alignSelf: 'stretch',
+  },
+  meBreakdownSection: {
+    marginBottom: 12,
+  },
+  meBreakdownSectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginBottom: 8,
+  },
+  meBreakdownItem: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  meBreakdownItemName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#ffffff',
+    flex: 1,
+    marginRight: 12,
+  },
+  meBreakdownItemTotal: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  meBreakdownItemNote: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  meBreakdownEmptyNote: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 12,
+  },
+  meBreakdownDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    marginVertical: 12,
+  },
+  meBreakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  meBreakdownLabel: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  meBreakdownValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#ffffff',
+  },
+  meBreakdownTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  meBreakdownTotalLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  meBreakdownTotalValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
   },
 });
