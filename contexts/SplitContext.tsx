@@ -38,6 +38,7 @@ export function SplitProvider({ children }: { children: React.ReactNode }) {
   const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
   const resetTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const historyLoadedRef = useRef(false);
 
   const addPerson = useCallback((name: string) => {
     const id = Date.now().toString();
@@ -144,34 +145,29 @@ export function SplitProvider({ children }: { children: React.ReactNode }) {
       });
 
       // Parse numeric values carefully
-      let totalAmount = 0;
       let tipAmount = 0;
       let taxAmount = 0;
 
       try {
-        // Normalize numeric values
-        totalAmount = parseFloat(prev.total.toString().replace(/[^0-9.]/g, '')) || 0;
         tipAmount = parseFloat(prev.tip.toString().replace(/[^0-9.]/g, '')) || 0;
         taxAmount = parseFloat(prev.tax.toString().replace(/[^0-9.]/g, '')) || 0;
 
-        // Validate the numbers
-        if (isNaN(totalAmount)) totalAmount = 0;
         if (isNaN(tipAmount)) tipAmount = 0;
         if (isNaN(taxAmount)) taxAmount = 0;
       } catch (error) {
         console.error('Error parsing numeric values:', error);
-        totalAmount = 0;
         tipAmount = 0;
         taxAmount = 0;
       }
 
-      // First, assign all subtotal amounts (items and unassigned)
+      // Derive subtotal from actual menu item prices so edits are always reflected
+      const subtotal = updatedMenuItems.reduce((sum, item) => sum + item.price, 0);
 
       // Calculate unassigned amount (to be split equally)
-      const unassignedAmount = totalAmount - assignedItemsTotal;
+      const unassignedAmount = subtotal - assignedItemsTotal;
 
       // If there are unassigned items, split them equally
-      if (unassignedAmount > 0) {
+      if (unassignedAmount > 0.001) {
         const unassignedPerPerson = unassignedAmount / people.length;
 
         people.forEach(person => {
@@ -192,10 +188,10 @@ export function SplitProvider({ children }: { children: React.ReactNode }) {
       // Now calculate and add tax and tip proportionally
       if (totalSubtotalContribution > 0) {
         console.log('--------- Split Calculation ---------');
-        console.log(`Subtotal: $${totalAmount - taxAmount}`);
+        console.log(`Subtotal: $${subtotal}`);
         console.log(`Tax: $${taxAmount}`);
         console.log(`Tip: $${tipAmount}`);
-        console.log(`Total bill amount: $${totalAmount + tipAmount}`);
+        console.log(`Total bill amount: $${subtotal + taxAmount + tipAmount}`);
 
         // Reset person totals - we'll recalculate everything based on proportions
         for (const personId in personTotals) {
@@ -234,7 +230,7 @@ export function SplitProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Check for rounding errors - ensure the sum equals the total bill
-        const expectedTotal = totalAmount + tipAmount;
+        const expectedTotal = subtotal + taxAmount + tipAmount;
         const roundingError = expectedTotal - totalCalculated;
 
         console.log(`Sum of all shares: $${totalCalculated.toFixed(2)}`);
@@ -263,9 +259,10 @@ export function SplitProvider({ children }: { children: React.ReactNode }) {
       // Log the new amounts
       console.log('New split amounts calculated', splitAmounts);
 
-      // Return the complete updated result
+      // Return the complete updated result (sync total to reflect any item price edits)
       return {
         ...updatedResult,
+        total: (subtotal + taxAmount).toFixed(2),
         splitAmounts
       };
     });
@@ -283,12 +280,11 @@ export function SplitProvider({ children }: { children: React.ReactNode }) {
     const tipToUse = typeof currentTip !== 'undefined' ? currentTip : result.tip;
     
     // Parse numeric values carefully
-    let totalAmount = 0, tipAmount = 0, taxAmount = 0;
+    let tipAmount = 0, taxAmount = 0;
     try {
-      totalAmount = parseFloat(result.total.toString().replace(/[^0-9.]/g, '')) || 0;
       tipAmount = parseFloat(tipToUse.toString().replace(/[^0-9.]/g, '')) || 0;
       taxAmount = parseFloat(result.tax.toString().replace(/[^0-9.]/g, '')) || 0;
-      if (isNaN(totalAmount) || isNaN(tipAmount) || isNaN(taxAmount)) {
+      if (isNaN(tipAmount) || isNaN(taxAmount)) {
         throw new Error('Parsed value is NaN');
       }
     } catch (error) {
@@ -297,7 +293,10 @@ export function SplitProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const subtotal = totalAmount - taxAmount;
+    // Derive subtotal from actual menu item prices so edits are always reflected
+    const subtotal = result.menuItems
+      ? result.menuItems.reduce((sum, item) => sum + item.price, 0)
+      : 0;
     
     // Step 1: Calculate each person's share of items + unassigned (subtotal only)
     const personItemTotals: Record<string, number> = {};
@@ -376,11 +375,11 @@ export function SplitProvider({ children }: { children: React.ReactNode }) {
     // Final log with result
     console.log('[MATH] Recalculation complete');
 
-    // Step 6: Update state
+    // Step 6: Update state (also sync total to reflect any item price edits)
+    const newTotal = (subtotal + taxAmount).toFixed(2);
     setResult(prev => {
       if (!prev) return undefined;
-      // Ensure we only update splitAmounts, preserving the rest (including the correct tip value)
-      return { ...prev, splitAmounts };
+      return { ...prev, total: newTotal, splitAmounts };
     });
 
   }, [result, people, setResult]);
@@ -390,14 +389,6 @@ export function SplitProvider({ children }: { children: React.ReactNode }) {
       console.error("Cannot update tip: result is not set.");
       return;
     }
-    /* --- TEMPORARILY COMMENT OUT FOR DEBUGGING --- 
-    if (currentHistoryId) {
-      console.log("Skipping direct tip update/recalculate: Editing from history.");
-      // When editing history, we don't want immediate recalc on load, 
-      // rely on the useEffect if needed later, or manual recalc on results screen if user edits tip there.
-      return; 
-    }
-    */
 
     const formattedTip = newTipAmount.toFixed(2);
     console.log(`Context: Updating tip to $${formattedTip} AND recalculating immediately.`);
@@ -478,6 +469,7 @@ export function SplitProvider({ children }: { children: React.ReactNode }) {
     setReceiptImage(undefined);
     setResult(undefined);
     setCurrentHistoryId(null);
+    historyLoadedRef.current = false;
     console.log('🔄 currentHistoryId set to null');
     setHasDirectNavigated(false);   // Reset navigation flags
     setHasEmergencyNavigated(false);
@@ -523,36 +515,30 @@ export function SplitProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Effect to recalculate split amounts when result or people change
+  // Effect to recalculate split amounts when result or people change
   useEffect(() => {
-    // ---> ADD CHECK: Only run if NOT loading/editing from history <---
-    if (currentHistoryId) {
-      console.log('Skipping recalculation effect: Editing from history.');
+    // When loading from history, skip the first recalculation (data already has splitAmounts).
+    // After that initial load, allow recalculations so edits are reflected.
+    if (currentHistoryId && !historyLoadedRef.current) {
+      console.log('Skipping recalculation: initial history load.');
+      historyLoadedRef.current = true;
       return;
     }
 
-    // Check if we have a result and items/tip to potentially trigger recalculation
     if (result && (result.menuItems || typeof result.tip !== 'undefined')) {
-      // ---> Add more detailed logging <---
-      const changedField = result.menuItems ? 'menuItems/people' : 'tip';
-      console.log(`Recalculation useEffect triggered by change in: ${changedField}`);
-      
-      // Get the current tip value to pass
       const currentTipValue = result.tip;
-      console.log(`>> useEffect: Current tip value before setTimeout: ${currentTipValue}`);
 
-      // Call recalculateSplitAmounts, maybe with a small delay to ensure state settles
       const timer = setTimeout(() => {
-        // Check result and history ID again inside timeout
-        if (result && !currentHistoryId) { 
-           console.log(`>> useEffect->setTimeout: Calling recalculateSplitAmounts with tip: ${currentTipValue}`);
-           recalculateSplitAmounts(currentTipValue); // Pass the current tip value
+        if (result) {
+          console.log(`Recalculation effect: recalculating with tip ${currentTipValue}`);
+          recalculateSplitAmounts(currentTipValue);
         }
-      }, 50); // Small delay
+      }, 50);
 
       return () => clearTimeout(timer);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result?.menuItems, result?.tip, people, currentHistoryId]); // REMOVED recalculateSplitAmounts
+  }, [result?.menuItems, result?.tip, people, currentHistoryId]);
 
   // Disable emergency navigation - it was causing issues
   useEffect(() => {

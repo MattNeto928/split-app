@@ -55,29 +55,36 @@ export const saveReceiptToHistory = async (
     const isDuplicate = existingHistory.some(item => {
       const existingTotal = parseFloat(item.result.total.replace(/[^0-9.]/g, ''));
       const newTotal = parseFloat(result.total.replace(/[^0-9.]/g, ''));
-      
-      // Consider it a duplicate if the total is the same and it was saved within the last 5 minutes
+
+      // Must match on total, restaurant name, AND item count to be a duplicate
+      const sameTotal = Math.abs(existingTotal - newTotal) < 0.01;
+      const sameName = (item.result.restaurantName || '') === (result.restaurantName || '');
+      const sameItemCount = (item.result.menuItems?.length || 0) === (result.menuItems?.length || 0);
+
+      // Must also be recent (within 2 minutes) to avoid blocking legitimate re-scans
       const itemDate = new Date(item.date);
       const now = new Date();
       const timeDiff = now.getTime() - itemDate.getTime();
-      const isRecent = timeDiff < 5 * 60 * 1000; // 5 minutes
-      
-      return Math.abs(existingTotal - newTotal) < 0.01 && isRecent;
+      const isRecent = timeDiff < 2 * 60 * 1000; // 2 minutes
+
+      return sameTotal && sameName && sameItemCount && isRecent;
     });
-    
-    if (isDuplicate && !existingId) { // Only block duplicates if not explicitly updating
-      console.log('Duplicate receipt detected (time/amount), not saving to history');
-      // Find the ID of the potential duplicate to return it, if possible
+
+    if (isDuplicate && !existingId) {
+      console.log('Duplicate receipt detected (total/name/items/time), not saving to history');
       const duplicateItem = existingHistory.find(item => {
         const existingTotal = parseFloat(item.result.total.replace(/[^0-9.]/g, ''));
         const newTotal = parseFloat(result.total.replace(/[^0-9.]/g, ''));
+        const sameTotal = Math.abs(existingTotal - newTotal) < 0.01;
+        const sameName = (item.result.restaurantName || '') === (result.restaurantName || '');
+        const sameItemCount = (item.result.menuItems?.length || 0) === (result.menuItems?.length || 0);
         const itemDate = new Date(item.date);
         const now = new Date();
         const timeDiff = now.getTime() - itemDate.getTime();
-        const isRecent = timeDiff < 5 * 60 * 1000; // 5 minutes
-        return Math.abs(existingTotal - newTotal) < 0.01 && isRecent;
+        const isRecent = timeDiff < 2 * 60 * 1000;
+        return sameTotal && sameName && sameItemCount && isRecent;
       });
-      return duplicateItem ? duplicateItem.id : ''; // Return existing ID or empty
+      return duplicateItem ? duplicateItem.id : '';
     }
     
     // Generate a unique ID for this receipt (only if it's truly new)

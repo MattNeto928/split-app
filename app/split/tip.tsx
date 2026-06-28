@@ -12,9 +12,8 @@ import { useThemeColor } from '../../hooks/useThemeColor';
 
 export default function TipScreen() {
   const router = useRouter();
-  const { 
-    result, 
-    setSplitResult, 
+  const {
+    result,
     updateTipAndRecalculate
   } = useSplitContext();
   const colorScheme = useColorScheme();
@@ -25,39 +24,13 @@ export default function TipScreen() {
   // Track component mounting
   const isMounted = useRef(false);
   
-  // Track if we came from the results page to edit the tip
-  const [isEditingTip, setIsEditingTip] = useState(false);
-  
-  // If the result already has a tip value, skip to results screen unless we are editing
+  // Set mounted flag on mount
   useEffect(() => {
-    // Set mounted flag
     isMounted.current = true;
-    
-    // Check if we came from results page by looking at navigation state
-    const checkIfEditingTip = () => {
-      try {
-        // Use a more reliable way to check if we're editing
-        return result?.tip !== undefined && result?.tip !== '';
-      } catch (e) {
-        return false;
-      }
-    };
-    
-    // Set editing state
-    setIsEditingTip(checkIfEditingTip());
-    
-    // Only auto-navigate if we have a tip AND we are not editing
-    const timer = setTimeout(() => {
-      if (isMounted.current && result?.tip && parseFloat(result.tip) > 0 && !checkIfEditingTip()) {
-        router.replace("/split/results");
-      }
-    }, 100);
-    
     return () => {
-      clearTimeout(timer);
       isMounted.current = false;
     };
-  }, [result, router]);
+  }, []);
 
   // Background gradient colors
   const backgroundGradient = isDark
@@ -181,41 +154,28 @@ export default function TipScreen() {
   const handleContinue = () => {
     // Dismiss keyboard if visible
     Keyboard.dismiss();
-    
+
     if (!result) return;
-    
+
     const tipAmount = calculateTipAmount();
-    
+
     // Validate tip
     if (tipAmount < 0) {
       Alert.alert('Invalid Tip', 'Tip amount cannot be negative.');
       return;
     }
-    
-    // Format the tip amount as a string with 2 decimal places
-    const formattedTip = tipAmount.toFixed(2);
-    
-    console.log(`Tip screen - setting tip amount to $${formattedTip}`);
-    
-    // Update the result with the tip amount
-    setSplitResult({
-      ...result,
-      tip: formattedTip
-    });
-    
-    // Call recalculateSplitAmounts explicitly before navigation
-    // This ensures the split amounts are updated before going to results
+
+    console.log(`Tip screen - setting tip amount to $${tipAmount.toFixed(2)}`);
+
+    // Single update: set tip and recalculate in one operation
     updateTipAndRecalculate(tipAmount);
-    
-    // Navigate with a delay to ensure state updates and recalculation complete
-    setTimeout(() => {
-      console.log('Navigating to results after tip processing');
-      
+
+    // Navigate after a frame to let state settle
+    requestAnimationFrame(() => {
       if (isMounted.current) {
-        // Use replace instead of push to prevent going back to tip screen
         router.replace('/split/results');
       }
-    }, 600); // Increased timeout to ensure calculations complete
+    });
   };
   
   const handleBack = () => {
@@ -316,6 +276,23 @@ export default function TipScreen() {
                   <TouchableOpacity
                     style={[
                       styles.tipOption,
+                      !isCustom && tipPercent === 0 && styles.selectedTip
+                    ]}
+                    onPress={() => handleSelectTip(0)}
+                  >
+                    <ThemedText style={[
+                      styles.tipText,
+                      { color: (!isCustom && tipPercent === 0) ? '#3498db' : textColor },
+                    ]}>0%</ThemedText>
+                    <ThemedText style={[
+                      styles.tipAmount,
+                      { color: (!isCustom && tipPercent === 0) ? '#3498db' : textColor },
+                    ]}>No Tip</ThemedText>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.tipOption,
                       !isCustom && tipPercent === 18 && styles.selectedTip
                     ]}
                     onPress={() => handleSelectTip(18)}
@@ -323,17 +300,13 @@ export default function TipScreen() {
                     <ThemedText style={[
                       styles.tipText,
                       { color: (!isCustom && tipPercent === 18) ? '#3498db' : textColor },
-                      // Apply selectedTipText for other properties if needed, but color is handled above
-                      // !isCustom && tipPercent === 18 && styles.selectedTipText
                     ]}>18%</ThemedText>
                     <ThemedText style={[
                       styles.tipAmount,
                       { color: (!isCustom && tipPercent === 18) ? '#3498db' : textColor },
-                       // Apply selectedTipText for other properties if needed, but color is handled above
-                      // !isCustom && tipPercent === 18 && styles.selectedTipText
                     ]}>${(subtotal * 0.18).toFixed(2)}</ThemedText>
                   </TouchableOpacity>
-                  
+
                   <TouchableOpacity
                     style={[
                       styles.tipOption,
@@ -350,7 +323,7 @@ export default function TipScreen() {
                       { color: (!isCustom && tipPercent === 20) ? '#3498db' : textColor },
                     ]}>${(subtotal * 0.20).toFixed(2)}</ThemedText>
                   </TouchableOpacity>
-                  
+
                   <TouchableOpacity
                     style={[
                       styles.tipOption,

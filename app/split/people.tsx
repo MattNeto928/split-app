@@ -190,8 +190,8 @@ export default function PeopleScreen() {
   };
 
   const handleNext = () => {
-    if (people.length < 1) {
-      Alert.alert('Error', 'Please add at least one person');
+    if (people.length < 2) {
+      Alert.alert('Not enough people', 'Add at least one other person to split with.');
       return;
     }
 
