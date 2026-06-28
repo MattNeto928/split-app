@@ -1,15 +1,4 @@
-import "dotenv/config";
-
-export default ({ config }) => {
-  // Read from local .env file in development
-  const geminiApiKey = process.env.GEMINI_API_KEY || "placeholder";
-
-  return {
-    ...config,
-    extra: {
-      ...config.extra,
-      geminiApiKey,
-    },
-    plugins: ["expo-router", "expo-font", "expo-web-browser"],
-  };
-};
+export default ({ config }) => ({
+  ...config,
+  plugins: ["expo-router", "expo-font", "expo-web-browser"],
+});

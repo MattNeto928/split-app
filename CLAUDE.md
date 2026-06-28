@@ -11,7 +11,6 @@ The purpose of the app is to be able to scan restaurant checks, and get the tota
 - Run tests: `npm test` or `yarn test`
 - Run single test: `npx jest path/to/test-file.test.tsx`
 - Lint code: `npm run lint`
-- Reset project: `npm run reset-project`
 
 ## Code Style Guidelines
 - TypeScript with strict mode enabled

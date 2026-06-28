@@ -344,14 +344,6 @@ function validateAndProcessImage(
   return { data: base64Data, mimeType };
 }
 
-// NOTE: setApiKey is no longer needed since the API key is stored securely on the backend.
-// This function is kept for backwards compatibility but does nothing.
-export function setApiKey(_key: string) {
-  console.log("API key management is now handled by the secure backend.");
-  console.log("Update the GEMINI_API_KEY environment variable in your Vercel dashboard.");
-  return true;
-}
-
 // Export a function to reset all state - only use this in very specific situations!
 export function resetApiState() {
   console.log("🔄 COMPLETE API STATE RESET requested");

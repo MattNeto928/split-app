@@ -1,6 +1,6 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { Stack, useRouter, usePathname } from 'expo-router';
+import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
@@ -25,8 +25,6 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
-  const router = useRouter();
-  const pathname = usePathname();
   const appState = useRef(AppState.currentState);
   const [loaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
@@ -37,31 +35,11 @@ export default function RootLayout() {
     OutfitExtraBold: Outfit_800ExtraBold,
   });
 
-  // Disable global navigation safeguard
-  useEffect(() => {
-    if (pathname === '/split/process') {
-      console.log('🌍 GLOBAL NAVIGATION MONITOR: Detected process screen');
-      console.log('🌍 Global navigation safeguard disabled to prevent conflicts');
-
-      // No timeout set - let natural navigation happen
-
-      return () => {
-        // No cleanup needed
-      };
-    }
-  }, [pathname]);
-
-  // Handle app state changes (background/foreground)
+  // Track app state changes (background/foreground)
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
         console.log('App has come to the foreground!');
-
-        // Disabled automatic navigation
-        if (pathname === '/split/process') {
-          console.log('🌍 App came to foreground while on process screen, but navigation is disabled');
-          // No automatic navigation
-        }
       }
 
       appState.current = nextAppState;
@@ -70,7 +48,7 @@ export default function RootLayout() {
     return () => {
       subscription.remove();
     };
-  }, [pathname]);
+  }, []);
 
   useEffect(() => {
     if (loaded) {
@@ -104,7 +82,6 @@ export default function RootLayout() {
               <Stack.Screen name="split/people" />
               <Stack.Screen name="split/camera" />
               <Stack.Screen name="split/review" />
-              <Stack.Screen name="split/process" />
               <Stack.Screen name="split/items" />
               <Stack.Screen name="split/tip" />
               <Stack.Screen name="split/results" />
