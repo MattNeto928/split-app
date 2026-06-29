@@ -1,11 +1,11 @@
-import React from 'react';
-import { StyleSheet, TouchableOpacity, View, ViewStyle, TextStyle } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { ReactNode } from 'react';
+import { StyleSheet, TextStyle, View, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
-import { ThemedText } from './ThemedText';
-import { useThemeColor } from '@/hooks/useThemeColor';
+import { IconButton } from '@/components/IconButton';
+import { ThemedText } from '@/components/ThemedText';
+import { Colors, Spacing } from '@/constants/Colors';
 
 interface SafeAreaHeaderProps {
   title: string;
@@ -15,6 +15,7 @@ interface SafeAreaHeaderProps {
   showBackButton?: boolean;
   backButtonColor?: string;
   backButtonBgColor?: string;
+  right?: ReactNode;
 }
 
 export function SafeAreaHeader({
@@ -25,11 +26,12 @@ export function SafeAreaHeader({
   showBackButton = true,
   backButtonColor,
   backButtonBgColor,
+  right,
 }: SafeAreaHeaderProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const textColor = useThemeColor({}, 'text');
-  
+  const c = Colors.light;
+
   const handleBack = () => {
     if (onBack) {
       onBack();
@@ -37,33 +39,37 @@ export function SafeAreaHeader({
       router.back();
     }
   };
-  
+
   return (
     <View
       style={[
         styles.container,
-        { paddingTop: Math.max(insets.top + 16, 60) }, // Increased padding to prevent cutoff
+        {
+          paddingTop: insets.top + Spacing.sm,
+          backgroundColor: c.background,
+        },
         containerStyle,
       ]}
     >
-      {showBackButton && (
-        <TouchableOpacity
-          style={[
-            styles.backButton,
-            backButtonBgColor ? { backgroundColor: backButtonBgColor } : null,
-          ]}
-          onPress={handleBack}
-        >
-          <Ionicons 
-            name="arrow-back" 
-            size={24} 
-            color={backButtonColor || textColor} 
+      <View style={styles.side}>
+        {showBackButton ? (
+          <IconButton
+            icon="arrow-back"
+            onPress={handleBack}
+            accessibilityLabel="Go back"
+            size={24}
+            color={backButtonColor}
+            variant={backButtonBgColor ? 'soft' : 'plain'}
+            style={backButtonBgColor ? { backgroundColor: backButtonBgColor } : undefined}
           />
-        </TouchableOpacity>
-      )}
-      <ThemedText type="title" style={[styles.title, titleStyle]}>
+        ) : null}
+      </View>
+
+      <ThemedText type="h3" numberOfLines={1} style={[styles.title, titleStyle]}>
         {title}
       </ThemedText>
+
+      <View style={[styles.side, styles.sideRight]}>{right}</View>
     </View>
   );
 }
@@ -72,20 +78,21 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingHorizontal: Spacing.xl,
+    paddingBottom: Spacing.md,
     width: '100%',
   },
-  backButton: {
-    marginRight: 16,
-    padding: 10,
-    borderRadius: 20,
-    backgroundColor: 'rgba(150, 150, 150, 0.1)',
+  // Fixed-width side slots keep the title optically centered regardless of
+  // whether a back button or right action is present.
+  side: {
+    minWidth: 44,
+    justifyContent: 'center',
+  },
+  sideRight: {
+    alignItems: 'flex-end',
   },
   title: {
-    flex: 1, // Allow title to take available space
-    textAlign: 'center', // Center the title text
-    fontSize: 28,
-    fontWeight: '600',
+    flex: 1,
+    textAlign: 'center',
   },
 });

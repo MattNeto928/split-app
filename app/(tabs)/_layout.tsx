@@ -1,44 +1,41 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { useThemeColor } from '@/hooks/useThemeColor';
-import { HapticTab } from '@/components/HapticTab';
-import BlurTabBarBackground from '@/components/ui/TabBarBackground';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { HapticTab } from '@/components/HapticTab';
+import { Colors, Fonts, Spacing } from '@/constants/Colors';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
-  const backgroundColor = useThemeColor({}, 'background');
-  const tintColor = useThemeColor({}, 'tint');
+  const c = Colors.light;
   const insets = useSafeAreaInsets();
-  
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
+        sceneStyle: { backgroundColor: c.background },
         tabBarStyle: {
-          backgroundColor: isDark ? 'rgba(18, 18, 18, 0.8)' : 'rgba(255, 255, 255, 0.8)',
-          borderTopWidth: 0,
+          backgroundColor: c.surface,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: c.border,
           elevation: 0,
           shadowOpacity: 0,
           height: 60 + insets.bottom,
           paddingBottom: insets.bottom,
-          paddingTop: 8,
+          paddingTop: Spacing.sm,
         },
-        tabBarActiveTintColor: tintColor,
-        tabBarInactiveTintColor: isDark ? '#888' : '#999',
+        tabBarActiveTintColor: c.accent,
+        tabBarInactiveTintColor: c.tabIconDefault,
         tabBarLabelStyle: {
           fontSize: 12,
-          fontFamily: 'OutfitMedium',
-          marginBottom: 4,
+          fontFamily: Fonts.medium,
+          marginBottom: Spacing.xs,
         },
         tabBarIconStyle: {
-          marginTop: 4,
+          marginTop: Spacing.xs,
         },
         tabBarButton: (props) => <HapticTab {...props} />,
-        tabBarBackground: () => <BlurTabBarBackground />,
       }}
     >
       <Tabs.Screen

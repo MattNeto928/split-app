@@ -1,655 +1,128 @@
-import { useState, useRef, useEffect } from 'react';
-import { 
-  StyleSheet, 
-  TouchableOpacity, 
-  FlatList, 
-  Alert, 
-  TextInput, 
-  Keyboard, 
-  Platform, 
-  KeyboardAvoidingView,
-  View,
-  Dimensions,
-  Text,
-  Animated,
-  Modal
-} from 'react-native';
+import { useState } from 'react';
+import { Keyboard, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { IconSymbol } from '@/components/ui/IconSymbol';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+import { Avatar } from '@/components/Avatar';
+import { Button } from '@/components/Button';
+import { IconButton } from '@/components/IconButton';
+import { Input } from '@/components/Input';
+import { ListRow } from '@/components/ListRow';
 import { SafeAreaHeader } from '@/components/SafeAreaHeader';
+import { Screen } from '@/components/Screen';
+import { ThemedText } from '@/components/ThemedText';
+import { useToast } from '@/components/Toast';
+import { Colors, Spacing } from '@/constants/Colors';
 import { useSplitContext } from '@/contexts/SplitContext';
-import { useThemeColor } from '@/hooks/useThemeColor';
-import { useColorScheme } from '@/hooks/useColorScheme';
 
 export default function PeopleScreen() {
   const router = useRouter();
   const { people, addPerson, removePerson } = useSplitContext();
+  const { show } = useToast();
   const [newName, setNewName] = useState('');
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
-  const [reminderVisible, setReminderVisible] = useState(false);
-  const modalFadeAnim = useRef(new Animated.Value(0)).current;
-  const modalScaleAnim = useRef(new Animated.Value(0.9)).current;
-  
-  const textColor = useThemeColor({}, 'text');
-  const backgroundColor = useThemeColor({}, 'background');
-  const inputRef = useRef<TextInput>(null);
-  const insets = useSafeAreaInsets();
-  
-  // Animation values
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(20)).current;
-  const listItemAnimations = useRef<Animated.Value[]>([]);
-  const buttonOpacityAnim = useRef(new Animated.Value(0.5)).current;
-  
-  // Track if component is mounted
-  const isMounted = useRef(true);
-  
-  // Prepare animations for existing items
-  useEffect(() => {
-    // Set mounted flag
-    isMounted.current = true;
-    
-    // Reset animation values
-    fadeAnim.setValue(0);
-    slideAnim.setValue(20);
-    
-    // Initialize animations for each person
-    listItemAnimations.current = people.map(() => new Animated.Value(0));
-    
-    // Start entrance animations
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 400,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 400,
-        useNativeDriver: true,
-      }),
-      ...listItemAnimations.current.map((anim, index) => 
-        Animated.timing(anim, {
-          toValue: 1,
-          duration: 300,
-          delay: 100 + (index * 50),
-          useNativeDriver: true,
-        })
-      )
-    ]).start();
-    
-    // Clean up function
-    return () => {
-      isMounted.current = false;
-    };
-  }, []);
-
-  // Animate button opacity based on whether there's text input
-  useEffect(() => {
-    Animated.timing(buttonOpacityAnim, {
-      toValue: newName.trim() ? 1 : 0.5,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-  }, [newName]);
+  const c = Colors.light;
 
   const handleAddPerson = () => {
-    if (!newName.trim()) {
-      Alert.alert('Error', 'Please enter a name');
-      return;
-    }
-    
-    // Create new animation for the new item
-    const newItemAnim = new Animated.Value(0);
-    listItemAnimations.current.push(newItemAnim);
-    
-    // Add the person first
-    addPerson(newName.trim());
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    addPerson(trimmed);
     setNewName('');
-    inputRef.current?.focus();
-    
-    // Then animate the new item
-    Animated.timing(newItemAnim, {
-      toValue: 1,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
   };
 
-  const showReminderModal = () => {
-    setReminderVisible(true);
-    Animated.parallel([
-      Animated.timing(modalFadeAnim, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.timing(modalScaleAnim, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      })
-    ]).start();
-  };
-
-  const hideReminderModal = () => {
-    Animated.parallel([
-      Animated.timing(modalFadeAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(modalScaleAnim, {
-        toValue: 0.9,
-        duration: 200,
-        useNativeDriver: true,
-      })
-    ]).start(() => {
-      setReminderVisible(false);
-    });
-  };
-
-  const handleAddPersonAndContinue = () => {
-    handleAddPerson();
-    hideReminderModal();
-    // We don't immediately navigate since handleAddPerson will add the person
-    // and we want to see the animation
-    setTimeout(() => {
-      navigateNext();
-    }, 400);
-  };
-  
   const navigateNext = () => {
-    // Dismiss keyboard before navigation
     Keyboard.dismiss();
-    
-    // Exit animation
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 0.5,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: -20,
-        duration: 200,
-        useNativeDriver: true,
-      })
-    ]).start(() => {
-      if (isMounted.current) {
-        router.push('/split/camera');
-      }
-    });
+    router.push('/split/camera');
   };
 
   const handleNext = () => {
-    if (people.length < 2) {
-      Alert.alert('Not enough people', 'Add at least one other person to split with.');
+    // If the user typed a name but didn't add it, fold it in so it isn't lost.
+    const pending = newName.trim();
+    const totalPeople = people.length + (pending ? 1 : 0);
+
+    if (totalPeople < 2) {
+      show('Add at least one other person to split with', { type: 'info' });
       return;
     }
 
-    // Check if there's text in the input field that hasn't been added yet
-    if (newName.trim()) {
-      showReminderModal();
-      return;
+    if (pending) {
+      addPerson(pending);
+      setNewName('');
+      show(`Added ${pending}`, { type: 'success' });
     }
-    
+
     navigateNext();
   };
 
   const handleBack = () => {
-    console.log('Back pressed on people screen, going to home');
-    
-    // Exit animation
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 20,
-        duration: 200,
-        useNativeDriver: true,
-      })
-    ]).start(() => {
-      if (isMounted.current) {
-        // Go back to home tab
-        router.replace('/');
-      }
-    });
+    router.replace('/');
   };
-  
-  // Background gradient colors
-  const backgroundGradient = isDark
-    ? ['#121212', '#1a1a1a'] as const
-    : ['#ffffff', '#f8f9fa'] as const;
-    
-  // Button gradient
-  const buttonGradient = isDark 
-    ? ['#3498db', '#2c7db1'] as const
-    : ['#3498db', '#2980b9'] as const;
 
   return (
-    <View style={styles.outerContainer}>
-      <LinearGradient
-        colors={backgroundGradient}
-        style={styles.background}
+    <Screen
+      header={<SafeAreaHeader title="Who's splitting?" onBack={handleBack} />}
+      footer={
+        <Button
+          title="Next: scan receipt"
+          onPress={handleNext}
+          rightIcon="arrow-forward"
+        />
+      }
+    >
+      <ThemedText type="default" muted style={styles.subtitle}>
+        Add everyone who will split the bill.
+      </ThemedText>
+
+      <Input
+        placeholder="Enter name"
+        value={newName}
+        onChangeText={setNewName}
+        onSubmitEditing={handleAddPerson}
+        returnKeyType="done"
+        autoCapitalize="words"
+        leftIcon="person-outline"
+        containerStyle={styles.input}
+        rightSlot={
+          <IconButton
+            icon="add"
+            onPress={handleAddPerson}
+            accessibilityLabel="Add person"
+            variant="soft"
+          />
+        }
       />
-      
-      {/* Custom Reminder Modal */}
-      <Modal
-        transparent={true}
-        visible={reminderVisible}
-        onRequestClose={hideReminderModal}
-        animationType="none"
-      >
-        <View style={styles.modalOverlay}>
-          <Animated.View 
-            style={[
-              styles.modalContainer,
-              { 
-                opacity: modalFadeAnim,
-                transform: [{ scale: modalScaleAnim }],
-                backgroundColor: isDark ? '#1a1a1a' : '#ffffff'
-              }
-            ]}
-          >
-            <View style={styles.modalHeader}>
-              <Ionicons 
-                name="alert-circle-outline" 
-                size={32} 
-                color="#3498db" 
-                style={styles.modalIcon} 
-              />
-              <ThemedText style={styles.modalTitle}>Reminder</ThemedText>
-            </View>
-            
-            <ThemedText style={styles.modalMessage}>
-              Do you want to add "{newName.trim()}" to the list?
-            </ThemedText>
-            
-            <View style={styles.modalActions}>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.modalButtonSecondary]}
-                onPress={() => {
-                  hideReminderModal();
-                  navigateNext();
-                }}
-              >
-                <ThemedText style={styles.modalButtonTextSecondary}>
-                  Skip & Continue
-                </ThemedText>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.modalButton}
-                onPress={handleAddPersonAndContinue}
-              >
-                <LinearGradient
-                  colors={buttonGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.modalButtonGradient}
-                >
-                  <Text style={styles.modalButtonText}>Add Person</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
-        </View>
-      </Modal>
-      
-      <KeyboardAvoidingView 
-        style={styles.keyboardAvoid} 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
-      >
-        <Animated.View style={[
-          styles.mainContainer, 
-          {
-            paddingBottom: insets.bottom > 0 ? insets.bottom : 20,
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }]
-          }
-        ]}>
-          <View style={styles.contentContainer}>
-            <SafeAreaHeader
-              title="Who's splitting?"
-              onBack={handleBack}
-            />
 
-            <ThemedText style={styles.subtitle}>
-              Add everyone who will split the bill
-            </ThemedText>
-
-            <View style={styles.inputContainer}>
-              <TextInput
-                ref={inputRef}
-                style={[styles.input, { color: textColor }]}
-                placeholder="Enter name"
-                placeholderTextColor={isDark ? "#777" : "#999"}
-                value={newName}
-                onChangeText={setNewName}
-                onSubmitEditing={handleAddPerson}
-                returnKeyType="done"
-              />
-              <TouchableOpacity 
-                onPress={newName.trim() ? handleAddPerson : () => inputRef.current?.focus()}
-                activeOpacity={0.9}
-              >
-                <Animated.View style={{ opacity: buttonOpacityAnim }}>
-                  <LinearGradient
-                    colors={buttonGradient}
-                    style={styles.addButton}
-                  >
-                    <Ionicons name="add" size={22} color="#fff" />
-                  </LinearGradient>
-                </Animated.View>
-              </TouchableOpacity>
-            </View>
-
-            <FlatList
-              data={people}
-              keyExtractor={(item) => item.id}
-              style={styles.list}
-              contentContainerStyle={styles.listContent}
-              renderItem={({ item, index }) => (
-                <Animated.View style={{
-                  opacity: listItemAnimations.current[index] || fadeAnim,
-                  transform: [{ 
-                    translateX: (listItemAnimations.current[index] || fadeAnim).interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [20, 0]
-                    })
-                  }]
-                }}>
-                  <View style={[
-                    styles.personItem,
-                    isDark ? styles.personItemDark : styles.personItemLight,
-                    item.id === 'me' && styles.meItem
-                  ]}>
-                    <View style={styles.personAvatar}>
-                      <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
-                    </View>
-                    <Text style={[styles.personName, { color: textColor }]}>{item.name}</Text>
-                    {item.id !== 'me' && (
-                      <TouchableOpacity 
-                        onPress={() => removePerson(item.id)}
-                        style={styles.removeButton}
-                      >
-                        <Ionicons name="close-circle" size={22} color={isDark ? "#ff6161" : "#ff3b30"} />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </Animated.View>
-              )}
-            />
-          </View>
-
-          <Animated.View style={styles.buttonWrapper}>
-            <TouchableOpacity 
-              style={styles.nextButton}
-              onPress={handleNext}
-              activeOpacity={0.9}
-            >
-              <LinearGradient
-                colors={buttonGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.nextButtonGradient}
-              >
-                <Text style={styles.nextButtonText}>Next: Scan Receipt</Text>
-                <Ionicons name="arrow-forward" size={20} color="#FFFFFF" style={styles.nextButtonIcon} />
-              </LinearGradient>
-            </TouchableOpacity>
-          </Animated.View>
-        </Animated.View>
-      </KeyboardAvoidingView>
-    </View>
+      <View style={styles.list}>
+        {people.map((person, index) => (
+          <ListRow
+            key={person.id}
+            left={<Avatar name={person.name} index={index} />}
+            title={person.name}
+            subtitle={person.id === 'me' ? 'You' : undefined}
+            right={
+              person.id !== 'me' ? (
+                <IconButton
+                  icon="close-circle"
+                  onPress={() => removePerson(person.id)}
+                  accessibilityLabel={`Remove ${person.name}`}
+                  color={c.mutedText}
+                />
+              ) : undefined
+            }
+          />
+        ))}
+      </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  outerContainer: {
-    flex: 1,
-    width: '100%',
-  },
-  background: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-  },
-  keyboardAvoid: {
-    flex: 1,
-    width: '100%',
-  },
-  mainContainer: {
-    flex: 1,
-    width: '100%',
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'space-between',
-  },
-  contentContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 24,
-    paddingVertical: 8,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontFamily: 'InterSemiBold',
-  },
-  backButton: {
-    marginRight: 16,
-    padding: 10,
-    borderRadius: 20,
-    backgroundColor: 'rgba(150, 150, 150, 0.1)',
-  },
   subtitle: {
-    fontSize: 16,
-    marginBottom: 30,
-    opacity: 0.8,
-    fontFamily: 'InterRegular',
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    marginBottom: 24,
-    alignItems: 'center',
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.xl,
   },
   input: {
-    flex: 1,
-    height: 54,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    marginRight: 12,
-    backgroundColor: 'rgba(150, 150, 150, 0.1)',
-    fontSize: 16,
-    fontFamily: 'InterRegular',
-  },
-  addButton: {
-    width: 54,
-    height: 54,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    marginBottom: Spacing.lg,
   },
   list: {
-    flex: 1,
-  },
-  listContent: {
-    paddingBottom: 80,
-  },
-  personItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 12,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-  },
-  personItemLight: {
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-  },
-  personItemDark: {
-    backgroundColor: 'rgba(50, 50, 50, 0.4)',
-  },
-  meItem: {
-    borderWidth: 1,
-    borderColor: 'rgba(52, 152, 219, 0.3)',
-  },
-  personAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#3498db',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  avatarText: {
-    color: 'white',
-    fontSize: 16,
-    fontFamily: 'InterMedium',
-    fontWeight: 'bold',
-  },
-  personName: {
-    flex: 1,
-    fontSize: 16,
-    fontFamily: 'InterMedium',
-  },
-  removeButton: {
-    padding: 8,
-  },
-  buttonWrapper: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    width: '100%',
-  },
-  nextButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-  },
-  nextButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 18,
-    paddingHorizontal: 32,
-    borderRadius: 16,
-  },
-  nextButtonText: {
-    color: '#fff',
-    fontFamily: 'InterSemiBold',
-    fontSize: 16,
-  },
-  nextButtonIcon: {
-    marginLeft: 8,
-  },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  modalContainer: {
-    width: '85%',
-    borderRadius: 20,
-    padding: 20,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 15,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    width: '100%',
-  },
-  modalIcon: {
-    marginRight: 10,
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontFamily: 'InterSemiBold',
-  },
-  modalMessage: {
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 24,
-    fontFamily: 'InterRegular',
-    lineHeight: 22,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-  },
-  modalButton: {
-    width: '48%',
-    borderRadius: 12,
-    overflow: 'hidden',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  modalButtonSecondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#3498db',
-  },
-  modalButtonGradient: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 12,
-  },
-  modalButtonText: {
-    color: '#fff',
-    fontFamily: 'InterSemiBold',
-    fontSize: 15,
-  },
-  modalButtonTextSecondary: {
-    color: '#3498db',
-    fontFamily: 'InterSemiBold',
-    fontSize: 15,
-    textAlign: 'center',
-    paddingVertical: 14,
+    marginBottom: Spacing.lg,
   },
 });

@@ -17,13 +17,86 @@ const API_CALL_TIMEOUT = 60000; // 60 seconds (1 minute)
 // Create a GLOBAL singleton to track receipt count
 let GLOBAL_RECEIPT_COUNT = 0;
 
+// How long we'll wait on the network request before aborting (60s) — matches
+// the backend function's maxDuration so we never abort a request the server
+// would have finished.
+const REQUEST_TIMEOUT_MS = 60000;
+
 // LOG STATUS - helpful for debugging
 console.log("🌎 GEMINI SERVICE LOADED - GLOBAL API CALL STATUS:", {
   GLOBAL_API_CALL_MADE,
   GLOBAL_API_CALL_IN_PROGRESS,
   hasGlobalResult: !!GLOBAL_API_RESULT,
   timeout: API_CALL_TIMEOUT,
+  requestTimeout: REQUEST_TIMEOUT_MS,
 });
+
+// ==============================================================
+// TYPED ERROR INFRASTRUCTURE
+// ==============================================================
+// Callers (e.g. review.tsx) can catch AnalyzeError and branch on `.kind`,
+// show `.userMessage` directly in UI, and offer a retry when `.retryable`.
+export type AnalyzeErrorKind =
+  | "network"
+  | "timeout"
+  | "server"
+  | "parse"
+  | "empty"
+  | "unknown";
+
+const USER_MESSAGES: Record<AnalyzeErrorKind, string> = {
+  network:
+    "Couldn't reach the server. Check your connection and try again.",
+  timeout: "This is taking longer than expected. Try again.",
+  server: "Something went wrong on our end. Please try again.",
+  parse: "We had trouble reading that receipt. Try again.",
+  empty: "Couldn't read any items on that receipt. Try retaking the photo.",
+  unknown: "Something went wrong. Please try again.",
+};
+
+// network / timeout / server are transient and worth retrying. empty is not
+// (the photo itself is the problem); parse / unknown default to not retryable.
+const RETRYABLE: Record<AnalyzeErrorKind, boolean> = {
+  network: true,
+  timeout: true,
+  server: true,
+  parse: false,
+  empty: false,
+  unknown: false,
+};
+
+export class AnalyzeError extends Error {
+  kind: AnalyzeErrorKind;
+  retryable: boolean;
+  userMessage: string;
+
+  constructor(
+    kind: AnalyzeErrorKind,
+    opts?: { userMessage?: string; cause?: unknown }
+  ) {
+    const userMessage = opts?.userMessage ?? USER_MESSAGES[kind];
+    super(userMessage);
+    this.name = "AnalyzeError";
+    this.kind = kind;
+    this.retryable = RETRYABLE[kind];
+    this.userMessage = userMessage;
+    if (opts?.cause !== undefined) {
+      // Preserve the original error for logging/debugging without surfacing it.
+      (this as any).cause = opts.cause;
+    }
+    // Restore the prototype chain (needed when targeting ES5).
+    Object.setPrototypeOf(this, AnalyzeError.prototype);
+  }
+}
+
+// Detect the AbortController timeout firing vs. a genuine network failure.
+function isAbortError(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    (err as any).name === "AbortError"
+  );
+}
 
 export async function analyzeReceipt(imageBase64: string) {
   try {
@@ -38,7 +111,9 @@ export async function analyzeReceipt(imageBase64: string) {
     // CRITICAL CHECK 2: If call is in progress, throw error to prevent duplicate calls
     if (GLOBAL_API_CALL_IN_PROGRESS) {
       console.log("⚠️ API CALL ALREADY IN PROGRESS - rejecting new request");
-      throw new Error("API request already in progress. Please wait.");
+      throw new AnalyzeError("unknown", {
+        userMessage: "A scan is already in progress. Please wait.",
+      });
     }
 
     // CRITICAL CHECK 3: Set in-progress flag immediately
@@ -103,23 +178,57 @@ export async function analyzeReceipt(imageBase64: string) {
     console.log("🚀 Calling secure backend API...");
     const startTime = Date.now();
 
-    const response = await fetch(`${BACKEND_URL}/api/analyze-receipt`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        imageBase64: imageData,
-        mimeType: mimeType,
-      }),
-    });
+    // Abort the request if it runs past our timeout window.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    let response: Response;
+    try {
+      response = await fetch(`${BACKEND_URL}/api/analyze-receipt`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          imageBase64: imageData,
+          mimeType: mimeType,
+        }),
+        signal: controller.signal,
+      });
+    } catch (fetchError) {
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      if (isAbortError(fetchError)) {
+        console.error(`⌛ Backend API call timed out after ${duration}s`);
+        throw new AnalyzeError("timeout", { cause: fetchError });
+      }
+      console.error(
+        `❌ Backend API call failed (network) after ${duration}s:`,
+        fetchError
+      );
+      throw new AnalyzeError("network", { cause: fetchError });
+    } finally {
+      // Always clear the timer so it can't fire after completion.
+      clearTimeout(timeoutId);
+    }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      console.error(`❌ Backend API call failed after ${duration}s:`, errorData);
-      throw new Error(errorData.error || "Failed to analyze receipt");
+      // Preserve the backend-provided message for logging, but show a friendly
+      // default to the user.
+      const backendMessage =
+        typeof errorData?.error === "string" ? errorData.error : undefined;
+      console.error(
+        `❌ Backend API call failed after ${duration}s (status ${response.status}):`,
+        errorData
+      );
+      throw new AnalyzeError("server", {
+        userMessage: backendMessage
+          ? `${USER_MESSAGES.server} (${backendMessage})`
+          : USER_MESSAGES.server,
+        cause: errorData,
+      });
     }
 
     console.log(`✅ Backend API call successful after ${duration}s`);
@@ -190,6 +299,13 @@ export async function analyzeReceipt(imageBase64: string) {
       console.log(
         `Expanded ${menuItems.length} menu items into ${expandedMenuItems.length} individual items`
       );
+
+      // If the receipt yielded no usable items, surface a non-retryable
+      // "empty" error so the user knows to retake the photo rather than retry.
+      if (expandedMenuItems.length === 0) {
+        console.log("⚠️ No menu items could be read from the receipt");
+        throw new AnalyzeError("empty");
+      }
 
       // Calculate the sum of all menu items to verify totals
       const calculatedItemsTotal = expandedMenuItems.reduce(
@@ -309,16 +425,29 @@ export async function analyzeReceipt(imageBase64: string) {
 
       return processedResult;
     } catch (jsonError) {
-      console.error("Error parsing JSON:", jsonError);
       // Reset the global flag so we can try again if this fails
       GLOBAL_API_CALL_MADE = false;
-      throw new Error("Failed to parse receipt data. Please try again.");
+      // Already-typed errors (e.g. the "empty" case above) pass through.
+      if (jsonError instanceof AnalyzeError) {
+        throw jsonError;
+      }
+      console.error("Error parsing JSON:", jsonError);
+      throw new AnalyzeError("parse", { cause: jsonError });
     }
   } catch (error) {
-    console.error("Error analyzing receipt:", error);
     // Reset the global flag so we can try again if this fails
     GLOBAL_API_CALL_MADE = false;
-    throw new Error("Failed to analyze receipt. Please try again.");
+    // Re-throw typed errors untouched so callers can inspect kind/userMessage.
+    if (error instanceof AnalyzeError) {
+      console.error(
+        `Error analyzing receipt [${error.kind}]:`,
+        (error as any).cause ?? error
+      );
+      throw error;
+    }
+    // Anything unexpected becomes a generic, friendly AnalyzeError.
+    console.error("Error analyzing receipt:", error);
+    throw new AnalyzeError("unknown", { cause: error });
   } finally {
     // Always reset the in-progress flag
     GLOBAL_API_CALL_IN_PROGRESS = false;
