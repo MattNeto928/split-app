@@ -1,0 +1,28 @@
+name: keep-warm
+
+# Pings the receipt backend's health check so the Vercel function stays warm
+# and the first real scan doesn't cold-start.
+#
+# IMPORTANT — cost: this repo is PRIVATE, so a frequent `schedule:` consumes
+# GitHub Actions minutes (each run bills a full minute; every-5-min is ~8,600
+# min/month, far past the 2,000 free minutes). For a TRULY FREE keep-warm:
+#   - make the repo public, then uncomment the schedule below (Actions minutes
+#     are unlimited/free for public repos), OR
+#   - use a free external monitor (e.g. UptimeRobot) pointed at the GET URL:
+#     https://split-serverless.vercel.app/api/analyze-receipt
+# Manual runs (Run workflow / workflow_dispatch) are always free to trigger.
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '*/5 * * * *'
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping analyze-receipt health check
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" https://split-serverless.vercel.app/api/analyze-receipt)
+          echo "Health ping -> HTTP $code"
+          test "$code" = "200"

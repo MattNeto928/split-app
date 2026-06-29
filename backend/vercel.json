@@ -1,1 +1,7 @@
-{}
+{
+  "functions": {
+    "api/analyze-receipt.ts": {
+      "maxDuration": 60
+    }
+  }
+}
