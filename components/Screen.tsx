@@ -37,16 +37,14 @@ export function Screen({
   // notch / Dynamic Island so nothing renders underneath it.
   const contentPaddingTop = header ? 0 : insets.top + Spacing.sm;
 
-  const innerContentStyle = [
-    styles.content,
-    { paddingTop: contentPaddingTop, paddingBottom: contentPaddingBottom },
-    contentStyle,
-  ];
-
   const body = scroll ? (
     <ScrollView
       style={styles.flex}
-      contentContainerStyle={innerContentStyle}
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: contentPaddingTop, paddingBottom: contentPaddingBottom },
+        contentStyle,
+      ]}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
       automaticallyAdjustKeyboardInsets
@@ -55,7 +53,13 @@ export function Screen({
       {children}
     </ScrollView>
   ) : (
-    <View style={[styles.flex, innerContentStyle]}>{children}</View>
+    // Non-scroll content fills the area and owns its own bottom spacing (a
+    // FlatList's contentContainerStyle, a footer, or centered content). Adding
+    // paddingBottom here would leave a dead strip of background below the
+    // content and above the tab bar, so we only pad the top.
+    <View style={[styles.flex, styles.content, { paddingTop: contentPaddingTop }, contentStyle]}>
+      {children}
+    </View>
   );
 
   return (
